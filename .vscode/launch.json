@@ -1,0 +1,51 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run arqo (Go)",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/apps/arqo",
+      "env": {
+        "ARQO_ADDR": ":8080"
+      }
+    },
+    {
+      "name": "Run worker-ts (Node TypeScript)",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/apps/worker-ts",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "--experimental-strip-types",
+        "src/index.ts"
+      ],
+      "env": {
+        "ARQO_URL": "http://127.0.0.1:8080",
+        "WORKER_ID": "vscode-worker-1"
+      }
+    },
+    {
+      "name": "Run polaris (Rust)",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": [
+          "build",
+          "--manifest-path",
+          "${workspaceFolder}/apps/polaris/Cargo.toml"
+        ],
+        "filter": {
+          "name": "polaris",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}/apps/polaris",
+      "env": {
+        "POLARIS_ADDR": "127.0.0.1:8082"
+      }
+    }
+  ]
+}

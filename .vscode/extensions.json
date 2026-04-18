@@ -1,0 +1,9 @@
+{
+  "recommendations": [
+    "golang.go",
+    "rust-lang.rust-analyzer",
+    "ms-vscode.vscode-typescript-next",
+    "esbenp.prettier-vscode",
+    "streetsidesoftware.code-spell-checker"
+  ]
+}

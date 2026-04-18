@@ -1,0 +1,15 @@
+.DS_Store
+.cache/
+
+# Go
+apps/arqo/bin/
+
+# Node
+apps/worker-ts/node_modules/
+apps/worker-ts/dist/
+
+# Rust
+apps/polaris/target/
+
+# IDE
+.vscode/*.log

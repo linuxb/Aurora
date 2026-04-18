@@ -1,0 +1,78 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: aurora-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: aurora
+      MYSQL_USER: aurora
+      MYSQL_PASSWORD: aurora
+    ports:
+      - "3306:3306"
+    command: ["--default-authentication-plugin=mysql_native_password"]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: aurora-redis
+    ports:
+      - "6379:6379"
+
+  kvrocks:
+    image: apache/kvrocks:latest
+    container_name: aurora-kvrocks
+    ports:
+      - "6666:6666"
+
+  memgraph:
+    image: memgraph/memgraph:latest
+    container_name: aurora-memgraph
+    ports:
+      - "7687:7687"
+      - "7444:7444"
+
+  arqo:
+    image: golang:1.24
+    container_name: aurora-arqo
+    working_dir: /workspace/apps/arqo
+    volumes:
+      - ./:/workspace
+    command: ["go", "run", "."]
+    environment:
+      ARQO_ADDR: ":8080"
+    ports:
+      - "8080:8080"
+    depends_on:
+      - redis
+      - mysql
+
+  worker-ts:
+    image: node:22-alpine
+    container_name: aurora-worker-ts
+    working_dir: /workspace/apps/worker-ts
+    volumes:
+      - ./:/workspace
+    command: ["npm", "run", "dev"]
+    environment:
+      ARQO_URL: "http://arqo:8080"
+      WORKER_ID: "docker-worker-1"
+    depends_on:
+      - arqo
+
+  polaris:
+    image: rust:1.90
+    container_name: aurora-polaris
+    working_dir: /workspace/apps/polaris
+    volumes:
+      - ./:/workspace
+    command: ["cargo", "run"]
+    environment:
+      POLARIS_ADDR: "0.0.0.0:8082"
+    ports:
+      - "8082:8082"
+    depends_on:
+      - redis
