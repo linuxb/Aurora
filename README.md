@@ -57,3 +57,6 @@ make test
 
 See roadmap: `doc/Phase-Plan.md`.
 TypeScript setup guide: `doc/Dev-Environment.md`.
+Decision traceability: `doc/Decision-Log.md`.
+Phase 0 progress: `doc/Phase-0-Progress.md`.
+Phase 1 progress: `doc/Phase-1-Progress.md`.

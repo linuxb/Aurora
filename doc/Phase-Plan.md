@@ -3,7 +3,18 @@
 ## 目标说明
 该计划基于现有设计文档，采用“每阶段都可演示 + 可测试 + 可回归”的推进方式。每个阶段都必须输出一个可被验证的里程碑。
 
-## Phase 0: MVP 框架落地（当前）
+## 决策追溯规则
+- 所有待决策点与已决策结果统一记录到 `doc/Decision-Log.md`。
+- 每条记录必须包含：`recorded_at`（RFC3339 含时区）、`phase`、`topic`、`status`、`decision`、`owner`。
+- 当决策被修改时，不覆盖原记录；新增一条 `status=superseded` 或新版本记录，并指向被替代项。
+- 每个 phase 结束时，补一条“phase closure”记录，包含未决项和风险说明，方便复盘。
+
+## Phase 文档分工
+- `doc/Phase-Plan.md`: 仅维护全局阶段目标、验收标准与整体节奏。
+- `doc/Phase-0-Progress.md`, `doc/Phase-1-Progress.md`, ...: 维护阶段执行进度、阶段内待决策点、讨论结论。
+- `doc/Decision-Log.md`: 维护跨阶段的统一决策追溯索引。
+
+## Phase 0: MVP 框架落地（已完成）
 
 ### 研发目标
 - 搭建可运行的三语言最小框架：
@@ -31,7 +42,7 @@
 - DAG 能完成完整 happy-path
 - 失败任务能把 DAG 置为 `REPLANNING`
 
-## Phase 1: 核心调度落库 + 基础事件流
+## Phase 1: 核心调度落库 + 基础事件流（进行中）
 
 ### 研发目标
 - 把 `arqo` 的 in-memory store 替换为 MySQL/TiDB 存储
@@ -132,8 +143,7 @@
 - 具备小流量灰度发布条件
 - 满足核心 SLO
 
-## 待讨论决策点
-1. Intent Slotting 模型路线：首期直接云端 LLM，还是本地轻量模型（Llama 8B）？
-2. 图数据库首期选型：开发阶段优先 Memgraph，还是提前对齐生产 NebulaGraph？
-3. Replanning 阶段策略：首版只做“失败后补偿节点”，还是支持“子图替换 + 回滚”？
-4. 短期记忆压缩阈值：按 token 固定阈值，还是按任务类型动态阈值？
+## 阶段追溯入口
+- Phase 0 progress: `doc/Phase-0-Progress.md`
+- Phase 1 progress: `doc/Phase-1-Progress.md`
+- Decision index: `doc/Decision-Log.md`
