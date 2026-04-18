@@ -1,7 +1,11 @@
 {
   "go.formatTool": "gofmt",
   "go.useLanguageServer": true,
-  "rust-analyzer.checkOnSave.command": "clippy",
+  "rust-analyzer.checkOnSave": true,
+  "rust-analyzer.check.command": "clippy",
+  "rust-analyzer.linkedProjects": [
+    "apps/polaris/Cargo.toml"
+  ],
   "editor.formatOnSave": true,
   "editor.codeActionsOnSave": {
     "source.fixAll": "explicit"
