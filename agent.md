@@ -1,7 +1,12 @@
 # Aurora Agentic System
 
 ## Project Structure
-doc: 设计文档，你可以通过它们了解系统的设计思路，系统架构以及开发Spec。
+doc
+|- design 设计文档，你可以通过它们了解系统的设计思路，系统架构以及开发Spec。
+|- progress 开发进度记录，研发时可以回顾之前开发内容。
+|- dev 开发调试指引
+
+生成文档时需要按照类别写入特定目录。
 
 ## Plan
 第一阶段我们只需要实现核心的框架，一些LLM调用接口可以先实现逻辑，数据可以mock。TS Worker可以简单实现几个demo，不需要模拟函数计算的serverless环境。但是核心的dag流转，调度器核心逻辑，记忆管理（GraphRAG，滚动压缩，内部查询Kvrocks输出的Skill）等需要把核心逻辑实现。

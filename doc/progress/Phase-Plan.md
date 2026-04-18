@@ -4,15 +4,15 @@
 该计划基于现有设计文档，采用“每阶段都可演示 + 可测试 + 可回归”的推进方式。每个阶段都必须输出一个可被验证的里程碑。
 
 ## 决策追溯规则
-- 所有待决策点与已决策结果统一记录到 `doc/Decision-Log.md`。
+- 所有待决策点与已决策结果统一记录到 `doc/progress/Decision-Log.md`。
 - 每条记录必须包含：`recorded_at`（RFC3339 含时区）、`phase`、`topic`、`status`、`decision`、`owner`。
 - 当决策被修改时，不覆盖原记录；新增一条 `status=superseded` 或新版本记录，并指向被替代项。
 - 每个 phase 结束时，补一条“phase closure”记录，包含未决项和风险说明，方便复盘。
 
 ## Phase 文档分工
-- `doc/Phase-Plan.md`: 仅维护全局阶段目标、验收标准与整体节奏。
-- `doc/Phase-0-Progress.md`, `doc/Phase-1-Progress.md`, ...: 维护阶段执行进度、阶段内待决策点、讨论结论。
-- `doc/Decision-Log.md`: 维护跨阶段的统一决策追溯索引。
+- `doc/progress/Phase-Plan.md`: 仅维护全局阶段目标、验收标准与整体节奏。
+- `doc/progress/Phase-0-Progress.md`, `doc/progress/Phase-1-Progress.md`, ...: 维护阶段执行进度、阶段内待决策点、讨论结论。
+- `doc/progress/Decision-Log.md`: 维护跨阶段的统一决策追溯索引。
 
 ## Phase 0: MVP 框架落地（已完成）
 
@@ -144,6 +144,6 @@
 - 满足核心 SLO
 
 ## 阶段追溯入口
-- Phase 0 progress: `doc/Phase-0-Progress.md`
-- Phase 1 progress: `doc/Phase-1-Progress.md`
-- Decision index: `doc/Decision-Log.md`
+- Phase 0 progress: `doc/progress/Phase-0-Progress.md`
+- Phase 1 progress: `doc/progress/Phase-1-Progress.md`
+- Decision index: `doc/progress/Decision-Log.md`

@@ -55,6 +55,6 @@
 - `decision_status`: decided
 
 ## 追溯链接
-- Project plan: `doc/Phase-Plan.md`
-- Decision log: `doc/Decision-Log.md`
-- Next phase progress: `doc/Phase-1-Progress.md`
+- Project plan: `doc/progress/Phase-Plan.md`
+- Decision log: `doc/progress/Decision-Log.md`
+- Next phase progress: `doc/progress/Phase-1-Progress.md`

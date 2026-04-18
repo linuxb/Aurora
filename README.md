@@ -43,6 +43,16 @@ Stop everything:
 make infra-down
 ```
 
+Run full stack in Docker:
+```bash
+make infra-up-full
+```
+
+Stop full stack:
+```bash
+make infra-down-full
+```
+
 ## Tests
 
 ```bash
@@ -55,8 +65,10 @@ make test
 - The interface contracts already follow the design docs (`READY/PENDING`, semantic errors, dual-track skill output).
 - Next phases can swap in MySQL/TiDB, Redis, and graph DB behind stable interfaces.
 
-See roadmap: `doc/Phase-Plan.md`.
-TypeScript setup guide: `doc/Dev-Environment.md`.
-Decision traceability: `doc/Decision-Log.md`.
-Phase 0 progress: `doc/Phase-0-Progress.md`.
-Phase 1 progress: `doc/Phase-1-Progress.md`.
+See roadmap: `doc/progress/Phase-Plan.md`.
+TypeScript setup guide: `doc/dev/Dev-Environment.md`.
+Decision traceability: `doc/progress/Decision-Log.md`.
+Phase 0 progress: `doc/progress/Phase-0-Progress.md`.
+Phase 1 progress: `doc/progress/Phase-1-Progress.md`.
+Local MySQL setup: `doc/dev/Local-MySQL-Setup.md`.
+Local dev debug setup: `doc/dev/Local-Dev-Debug-Setup.md`.
