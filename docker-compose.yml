@@ -44,6 +44,10 @@ services:
     command: ["go", "run", "."]
     environment:
       ARQO_ADDR: ":8080"
+      ARQO_SCHEDULER_BACKEND: "mysql"
+      ARQO_MYSQL_DSN: "aurora:aurora@tcp(mysql:3306)/aurora?parseTime=true&multiStatements=true"
+      ARQO_EVENT_BACKEND: "redis"
+      ARQO_REDIS_ADDR: "redis:6379"
     ports:
       - "8080:8080"
     depends_on:

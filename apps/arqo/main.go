@@ -17,9 +17,30 @@ import (
 func main() {
 	addr := envOrDefault("ARQO_ADDR", ":8080")
 
-	store := scheduler.NewStore()
-	broker := events.NewBroker()
-	server := api.NewServer(store, broker)
+	engine, schedulerBackend, err := scheduler.NewEngineFromEnv()
+	if err != nil {
+		log.Fatalf("failed to init scheduler backend: %v", err)
+	}
+	defer func() {
+		if closeErr := engine.Close(); closeErr != nil {
+			log.Printf("scheduler backend close error: %v", closeErr)
+		}
+	}()
+
+	log.Printf("scheduler backend initialized: %s", schedulerBackend)
+
+	broker, backend, err := events.NewBrokerFromEnv()
+	if err != nil {
+		log.Fatalf("failed to init event broker: %v", err)
+	}
+	defer func() {
+		if closeErr := broker.Close(); closeErr != nil {
+			log.Printf("event broker close error: %v", closeErr)
+		}
+	}()
+
+	log.Printf("event backend initialized: %s", backend)
+	server := api.NewServer(engine, broker)
 	mux := http.NewServeMux()
 	server.Register(mux)
 
@@ -31,7 +52,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	go runSweeper(ctx, store)
+	go runSweeper(ctx, engine)
 	go func() {
 		log.Printf("arqo listening on %s", addr)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -47,7 +68,7 @@ func main() {
 	}
 }
 
-func runSweeper(ctx context.Context, store *scheduler.Store) {
+func runSweeper(ctx context.Context, engine scheduler.Engine) {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -55,7 +76,7 @@ func runSweeper(ctx context.Context, store *scheduler.Store) {
 		case <-ctx.Done():
 			return
 		case t := <-ticker.C:
-			expired := store.ExpireRunningTasks(t.UTC())
+			expired := engine.ExpireRunningTasks(t.UTC())
 			if len(expired) > 0 {
 				log.Printf("sweeper expired tasks: %v", expired)
 			}

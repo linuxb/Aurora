@@ -244,6 +244,10 @@ func (s *Store) ResolveSessionIDByTaskID(taskID string) (string, bool) {
 	return dag.SessionID, true
 }
 
+func (s *Store) Close() error {
+	return nil
+}
+
 func (s *Store) refreshDAGStatusLocked(dagID string) {
 	tasks := s.tasksByDAG[dagID]
 	if len(tasks) == 0 {

@@ -1,14 +1,20 @@
 package events
 
 import (
+	"context"
 	"testing"
 	"time"
 )
 
 func TestPublishAndSubscribe(t *testing.T) {
-	broker := NewBroker()
-	ch, cancel := broker.Subscribe("sess_1")
+	broker := NewMemoryBroker()
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	ch, err := broker.Subscribe(ctx, "sess_1")
+	if err != nil {
+		t.Fatalf("subscribe failed: %v", err)
+	}
 
 	evt := Event{
 		SessionID: "sess_1",
@@ -17,7 +23,9 @@ func TestPublishAndSubscribe(t *testing.T) {
 		Message:   "running",
 		At:        time.Now().UTC(),
 	}
-	broker.Publish(evt)
+	if err := broker.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("publish failed: %v", err)
+	}
 
 	select {
 	case got := <-ch:
@@ -30,11 +38,18 @@ func TestPublishAndSubscribe(t *testing.T) {
 }
 
 func TestSessionIsolation(t *testing.T) {
-	broker := NewBroker()
-	ch, cancel := broker.Subscribe("sess_2")
+	broker := NewMemoryBroker()
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	broker.Publish(Event{SessionID: "sess_1", EventType: "NODE_PROGRESS", Message: "hello", At: time.Now().UTC()})
+	ch, err := broker.Subscribe(ctx, "sess_2")
+	if err != nil {
+		t.Fatalf("subscribe failed: %v", err)
+	}
+
+	if err := broker.Publish(context.Background(), Event{SessionID: "sess_1", EventType: "NODE_PROGRESS", Message: "hello", At: time.Now().UTC()}); err != nil {
+		t.Fatalf("publish failed: %v", err)
+	}
 
 	select {
 	case <-ch:

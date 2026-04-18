@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,11 +14,11 @@ import (
 )
 
 type Server struct {
-	store  *scheduler.Store
-	broker *events.Broker
+	store  scheduler.Engine
+	broker events.Broker
 }
 
-func NewServer(store *scheduler.Store, broker *events.Broker) *Server {
+func NewServer(store scheduler.Engine, broker events.Broker) *Server {
 	return &Server{store: store, broker: broker}
 }
 
@@ -52,7 +53,7 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	snapshot := s.store.CreateDemoSession(req.UserID, req.Intent)
-	s.publishEvent(events.Event{
+	s.publishEvent(r.Context(), events.Event{
 		SessionID: snapshot.Session.SessionID,
 		EventType: "SESSION_CREATED",
 		Message:   "session created",
@@ -98,7 +99,7 @@ func (s *Server) pullTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if sessionID, ok := s.store.ResolveSessionIDByTaskID(task.TaskID); ok {
-		s.publishEvent(events.Event{
+		s.publishEvent(r.Context(), events.Event{
 			SessionID: sessionID,
 			EventType: "TASK_LEASED",
 			TaskID:    task.TaskID,
@@ -158,7 +159,7 @@ func (s *Server) completeTask(w http.ResponseWriter, r *http.Request) {
 		if !req.Success {
 			eventType = "TASK_FAILED"
 		}
-		s.publishEvent(events.Event{
+		s.publishEvent(r.Context(), events.Event{
 			SessionID: sessionID,
 			EventType: eventType,
 			TaskID:    task.TaskID,
@@ -218,7 +219,7 @@ func (s *Server) ingestTelemetry(w http.ResponseWriter, r *http.Request) {
 		req.Source = "worker"
 	}
 
-	s.publishEvent(events.Event{
+	s.publishEvent(r.Context(), events.Event{
 		SessionID: sessionID,
 		EventType: req.EventType,
 		TaskID:    req.TaskID,
@@ -248,8 +249,11 @@ func (s *Server) streamSessionEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 
-	ch, cancel := s.broker.Subscribe(sessionID)
-	defer cancel()
+	ch, err := s.broker.Subscribe(r.Context(), sessionID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "subscribe_failed", err.Error())
+		return
+	}
 
 	_, _ = fmt.Fprint(w, ": stream started\n\n")
 	flusher.Flush()
@@ -267,11 +271,11 @@ func (s *Server) streamSessionEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) publishEvent(evt events.Event) {
+func (s *Server) publishEvent(ctx context.Context, evt events.Event) {
 	if s.broker == nil {
 		return
 	}
-	s.broker.Publish(evt)
+	_ = s.broker.Publish(ctx, evt)
 }
 
 func respondJSON(w http.ResponseWriter, status int, data any) {

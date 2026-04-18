@@ -1,7 +1,7 @@
 SHELL := /bin/zsh
 GOCACHE ?= $(CURDIR)/.cache/go-build
 
-.PHONY: help run-arqo run-worker run-polaris test-arqo test-polaris test check-env infra-up infra-down
+.PHONY: help run-arqo run-worker run-polaris test-arqo test-polaris test check-env infra-up infra-down infra-up-dev infra-down-dev infra-up-full infra-down-full
 
 help:
 	@echo "Targets:"
@@ -10,8 +10,10 @@ help:
 	@echo "  run-polaris   - run Rust memory controller"
 	@echo "  test          - run arqo/polaris tests"
 	@echo "  check-env     - check go/rust/node/docker toolchain"
-	@echo "  infra-up      - start mysql/redis/kvrocks/memgraph"
-	@echo "  infra-down    - stop local infra"
+	@echo "  infra-up      - start dev infra dependencies only (mysql/redis/kvrocks/memgraph)"
+	@echo "  infra-down    - stop dev infra dependencies"
+	@echo "  infra-up-full - start full stack from docker-compose.yml"
+	@echo "  infra-down-full - stop full stack from docker-compose.yml"
 
 run-arqo:
 	mkdir -p $(GOCACHE)
@@ -40,7 +42,19 @@ check-env:
 	@echo "Docker:" && docker --version && docker compose version
 
 infra-up:
-	docker compose up -d mysql redis kvrocks memgraph
+	docker compose -f docker-compose.dev.yml up -d
+
+infra-up-dev:
+	docker compose -f docker-compose.dev.yml up -d
 
 infra-down:
-	docker compose down
+	docker compose -f docker-compose.dev.yml down
+
+infra-down-dev:
+	docker compose -f docker-compose.dev.yml down
+
+infra-up-full:
+	docker compose -f docker-compose.yml up -d
+
+infra-down-full:
+	docker compose -f docker-compose.yml down

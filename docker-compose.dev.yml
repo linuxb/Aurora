@@ -1,0 +1,36 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: aurora-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: aurora
+      MYSQL_USER: aurora
+      MYSQL_PASSWORD: aurora
+    ports:
+      - "3306:3306"
+    command: ["--default-authentication-plugin=mysql_native_password"]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: aurora-redis
+    ports:
+      - "6379:6379"
+
+  kvrocks:
+    image: apache/kvrocks:latest
+    container_name: aurora-kvrocks
+    ports:
+      - "6666:6666"
+
+  memgraph:
+    image: memgraph/memgraph:latest
+    container_name: aurora-memgraph
+    ports:
+      - "7687:7687"
+      - "7444:7444"
