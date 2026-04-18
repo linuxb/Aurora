@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"aurora/apps/arqo/internal/api"
+	"aurora/apps/arqo/internal/events"
 	"aurora/apps/arqo/internal/scheduler"
 )
 
@@ -17,7 +18,8 @@ func main() {
 	addr := envOrDefault("ARQO_ADDR", ":8080")
 
 	store := scheduler.NewStore()
-	server := api.NewServer(store)
+	broker := events.NewBroker()
+	server := api.NewServer(store, broker)
 	mux := http.NewServeMux()
 	server.Register(mux)
 

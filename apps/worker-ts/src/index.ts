@@ -6,15 +6,34 @@ const gatewayURL = process.env.ARQO_URL ?? "http://127.0.0.1:8080";
 const workerID = process.env.WORKER_ID ?? "worker-ts-1";
 const loopIntervalMS = Number(process.env.WORKER_LOOP_INTERVAL_MS ?? "800");
 
-function emitTelemetry(eventType: TelemetryEventType, taskID: string, message: string): void {
+async function emitTelemetry(
+  eventType: TelemetryEventType,
+  taskID: string,
+  message: string,
+): Promise<void> {
   const event = {
-    session_id: "local-dev",
     event_type: eventType,
     task_id: taskID,
     message,
+    source: workerID,
     at: new Date().toISOString(),
   };
+
   console.log(JSON.stringify(event));
+
+  try {
+    const res = await fetch(`${gatewayURL}/v1/telemetry`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(event),
+      signal: AbortSignal.timeout(1500),
+    });
+    if (!res.ok) {
+      console.warn(`[worker-ts] telemetry rejected: ${res.status}`);
+    }
+  } catch (error) {
+    console.warn("[worker-ts] telemetry post failed", error);
+  }
 }
 
 async function pullTask(): Promise<Task | null> {
@@ -51,11 +70,11 @@ async function runOnce(): Promise<boolean> {
     return false;
   }
 
-  emitTelemetry("NODE_START", task.task_id, `Start executing skill=${task.skill_name}`);
+  await emitTelemetry("NODE_START", task.task_id, `Start executing skill=${task.skill_name}`);
 
   try {
     const response = await runSkill(task.skill_name, task.task_id);
-    emitTelemetry("NODE_FINISH", task.task_id, response.summary);
+    await emitTelemetry("NODE_FINISH", task.task_id, response.summary);
     await completeTask(task.task_id, {
       success: true,
       summary: response.summary,
@@ -68,7 +87,7 @@ async function runOnce(): Promise<boolean> {
         ? error
         : new AuroraSkillError("UNKNOWN", "worker unexpected error", String(error));
 
-    emitTelemetry("NODE_FINISH", task.task_id, `Failed: ${skillError.human_readable_msg}`);
+    await emitTelemetry("NODE_FINISH", task.task_id, `Failed: ${skillError.human_readable_msg}`);
     await completeTask(task.task_id, {
       success: false,
       summary: skillError.human_readable_msg,

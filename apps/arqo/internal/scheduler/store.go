@@ -229,6 +229,21 @@ func (s *Store) GetSessionSnapshot(sessionID string) (Snapshot, error) {
 	return s.snapshotLocked(sessionID), nil
 }
 
+func (s *Store) ResolveSessionIDByTaskID(taskID string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	task, ok := s.tasksByID[taskID]
+	if !ok {
+		return "", false
+	}
+	dag, ok := s.dags[task.DAGID]
+	if !ok {
+		return "", false
+	}
+	return dag.SessionID, true
+}
+
 func (s *Store) refreshDAGStatusLocked(dagID string) {
 	tasks := s.tasksByDAG[dagID]
 	if len(tasks) == 0 {
