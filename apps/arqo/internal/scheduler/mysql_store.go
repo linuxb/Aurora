@@ -143,7 +143,7 @@ ORDER BY created_at ASC
 LIMIT 1
 FOR UPDATE SKIP LOCKED`)
 
-	task, err := scanTaskRow(row)
+	task, err := scanReadyTaskRow(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNoReadyTask
@@ -526,6 +526,29 @@ func scanTaskRow(row *sql.Row) (*model.Task, error) {
 		task.LastHumanReadableErrorMsg = lastHumanError.String
 	}
 
+	return &task, nil
+}
+
+func scanReadyTaskRow(row *sql.Row) (*model.Task, error) {
+	var task model.Task
+	var status string
+	var depsJSON, childrenJSON string
+
+	if err := row.Scan(
+		&task.TaskID,
+		&task.DAGID,
+		&task.SkillName,
+		&status,
+		&task.PendingDependenciesCount,
+		&depsJSON,
+		&childrenJSON,
+	); err != nil {
+		return nil, err
+	}
+
+	task.Status = model.TaskStatus(status)
+	_ = json.Unmarshal([]byte(depsJSON), &task.Dependencies)
+	_ = json.Unmarshal([]byte(childrenJSON), &task.Children)
 	return &task, nil
 }
 
