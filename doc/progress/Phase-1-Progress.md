@@ -32,6 +32,10 @@
   - Symptom: `POST /v1/tasks/pull` returned `500`, message: `sql: expected 7 destination arguments in Scan, not 12`.
   - Root cause: Ready-task query selected 7 columns but used 12-column scanner.
   - Fix: Added dedicated ready-task scanner path and covered by unit test.
+- Added TiDB-compatible scheduler backend entry (`ARQO_SCHEDULER_BACKEND=tidb`) reusing mysql-compatible SQL path.
+- Added concurrency safety tests in scheduler memory engine:
+  - concurrent pull duplicate-lease prevention
+  - concurrent complete idempotency and dependency-counter underflow guard
 
 ## Integration Verification (2026-04-19T23:00:00+08:00)
 - Environment:
@@ -66,8 +70,8 @@
     - `task_raw_data` present for all 3 tasks.
 
 ## Pending in Phase 1
-- Decide TiDB migration timing and SQL compatibility checklist.
 - Add concurrency tests for duplicate lease prevention with persistent storage.
+- Run real TiDB integration verification and collect SQL compatibility checklist.
 
 ## New Decision Points for Phase 1
 1. `2026-04-18T18:40:00+08:00` | Should we keep SSE event payload versioned (`schema_version`) from this phase?

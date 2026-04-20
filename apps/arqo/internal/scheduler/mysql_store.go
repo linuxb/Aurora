@@ -16,7 +16,8 @@ import (
 )
 
 type MySQLStore struct {
-	db *sql.DB
+	db      *sql.DB
+	dialect string
 }
 
 func NewMySQLStoreFromEnv() (*MySQLStore, error) {
@@ -27,23 +28,38 @@ func NewMySQLStoreFromEnv() (*MySQLStore, error) {
 	return NewMySQLStore(dsn)
 }
 
+func NewTiDBStoreFromEnv() (*MySQLStore, error) {
+	dsn := strings.TrimSpace(os.Getenv("ARQO_TIDB_DSN"))
+	if dsn == "" {
+		dsn = strings.TrimSpace(os.Getenv("ARQO_MYSQL_DSN"))
+	}
+	if dsn == "" {
+		dsn = "root@tcp(127.0.0.1:4000)/aurora?parseTime=true&multiStatements=true"
+	}
+	return newSQLCompatibleStore(dsn, "tidb")
+}
+
 func NewMySQLStore(dsn string) (*MySQLStore, error) {
+	return newSQLCompatibleStore(dsn, "mysql")
+}
+
+func newSQLCompatibleStore(dsn string, dialect string) (*MySQLStore, error) {
 	if !isMySQLDriverRegistered() {
-		return nil, errors.New("mysql driver is not registered; install and import github.com/go-sql-driver/mysql before enabling mysql scheduler backend")
+		return nil, errors.New("mysql-compatible driver is not registered; install and import github.com/go-sql-driver/mysql before enabling mysql/tidb scheduler backend")
 	}
 
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
-		return nil, fmt.Errorf("open mysql failed: %w", err)
+		return nil, fmt.Errorf("open %s failed: %w", dialect, err)
 	}
 
-	store := &MySQLStore{db: db}
+	store := &MySQLStore{db: db, dialect: dialect}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("ping mysql failed: %w", err)
+		return nil, fmt.Errorf("ping %s failed: %w", dialect, err)
 	}
 	if err := store.ensureSchema(ctx); err != nil {
 		_ = db.Close()
@@ -63,7 +79,7 @@ func isMySQLDriverRegistered() bool {
 }
 
 func newMySQLStoreWithDB(db *sql.DB) *MySQLStore {
-	return &MySQLStore{db: db}
+	return &MySQLStore{db: db, dialect: "mysql"}
 }
 
 func (s *MySQLStore) CreateDemoSession(userID, intent string) (Snapshot, error) {

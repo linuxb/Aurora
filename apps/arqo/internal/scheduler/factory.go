@@ -21,6 +21,12 @@ func NewEngineFromEnv() (Engine, string, error) {
 			return nil, "", err
 		}
 		return engine, backend, nil
+	case "tidb":
+		engine, err := NewTiDBStoreFromEnv()
+		if err != nil {
+			return nil, "", err
+		}
+		return engine, backend, nil
 	default:
 		return nil, "", fmt.Errorf("unsupported scheduler backend: %s", backend)
 	}

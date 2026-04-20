@@ -32,3 +32,11 @@ func TestNewEngineFromEnvMySQLWithoutDriver(t *testing.T) {
 		t.Fatal("expected error when mysql driver is not registered")
 	}
 }
+
+func TestNewEngineFromEnvTiDBWithoutDriver(t *testing.T) {
+	t.Setenv("ARQO_SCHEDULER_BACKEND", "tidb")
+	_, _, err := NewEngineFromEnv()
+	if err == nil {
+		t.Fatal("expected error when mysql-compatible driver is not registered")
+	}
+}

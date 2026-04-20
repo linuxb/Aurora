@@ -1,6 +1,8 @@
 package scheduler
 
 import (
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -111,5 +113,118 @@ func TestFailureMovesDAGToReplanning(t *testing.T) {
 	}
 	if got, want := final.DAG.ReplanCount, 1; got != want {
 		t.Fatalf("unexpected replan count: got=%d want=%d", got, want)
+	}
+}
+
+func TestConcurrentPullPreventsDuplicateLease(t *testing.T) {
+	store := NewStore()
+	snapshot, err := store.CreateDemoSession("u-concurrency", "lease test")
+	if err != nil {
+		t.Fatalf("create session failed: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	const workers = 16
+	var successCount atomic.Int32
+	taskIDs := make(chan string, workers)
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			task, err := store.PullReadyTask("worker-"+time.Now().Format("150405.000")+string(rune('a'+worker)), time.Minute)
+			if err == nil {
+				successCount.Add(1)
+				taskIDs <- task.TaskID
+				return
+			}
+			if err != ErrNoReadyTask {
+				t.Errorf("unexpected pull error: %v", err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(taskIDs)
+
+	if got := successCount.Load(); got != 1 {
+		t.Fatalf("expected exactly one successful lease, got=%d", got)
+	}
+	for taskID := range taskIDs {
+		if taskID == "" {
+			t.Fatal("leased task id is empty")
+		}
+	}
+
+	final, err := store.GetSessionSnapshot(snapshot.Session.SessionID)
+	if err != nil {
+		t.Fatalf("snapshot failed: %v", err)
+	}
+	runningCount := 0
+	for _, task := range final.Tasks {
+		if task.Status == model.TaskStatusRunning {
+			runningCount++
+		}
+	}
+	if runningCount != 1 {
+		t.Fatalf("expected 1 running task after concurrent pull, got=%d", runningCount)
+	}
+}
+
+func TestConcurrentCompleteNoDependencyUnderflow(t *testing.T) {
+	store := NewStore()
+	snapshot, err := store.CreateDemoSession("u-concurrency", "complete test")
+	if err != nil {
+		t.Fatalf("create session failed: %v", err)
+	}
+
+	task, err := store.PullReadyTask("worker-1", time.Minute)
+	if err != nil {
+		t.Fatalf("pull failed: %v", err)
+	}
+
+	const attempts = 10
+	var wg sync.WaitGroup
+	var successCount atomic.Int32
+
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := store.CompleteTask(CompleteTaskInput{
+				TaskID:   task.TaskID,
+				WorkerID: "worker-1",
+				Success:  true,
+				Summary:  "ok",
+				RawData:  map[string]any{"k": "v"},
+			}); err == nil {
+				successCount.Add(1)
+			} else if err != ErrTaskNotRunnable {
+				t.Errorf("unexpected complete error: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if got := successCount.Load(); got != 1 {
+		t.Fatalf("expected exactly one successful complete, got=%d", got)
+	}
+
+	final, err := store.GetSessionSnapshot(snapshot.Session.SessionID)
+	if err != nil {
+		t.Fatalf("snapshot failed: %v", err)
+	}
+
+	for _, tsk := range final.Tasks {
+		if tsk.PendingDependenciesCount < 0 {
+			t.Fatalf("pending_dependencies_count underflow detected on task=%s count=%d", tsk.TaskID, tsk.PendingDependenciesCount)
+		}
+		if tsk.SkillName == "LLMSummarize" {
+			if tsk.PendingDependenciesCount != 0 {
+				t.Fatalf("expected LLMSummarize dependency count=0, got=%d", tsk.PendingDependenciesCount)
+			}
+			if tsk.Status != model.TaskStatusReady {
+				t.Fatalf("expected LLMSummarize status READY, got=%s", tsk.Status)
+			}
+		}
 	}
 }

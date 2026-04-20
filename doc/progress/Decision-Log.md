@@ -87,3 +87,12 @@ This file records architecture and product decisions with traceability.
 - `owner`: user + assistant
 - `source`: conversation + `doc/dev/Local-Dev-Debug-Setup.md`
 - `follow_up`: Keep `Makefile` commands aligned with both compose modes.
+
+### 2026-04-20T10:00:00+08:00 | Phase 1 | TiDB compatibility start
+- `status`: decided
+- `decision`: Start TiDB compatibility implementation now; do not keep scheduler backend fixed to MySQL only.
+- `context`: Phase 1 pending item response from user.
+- `impact`: Scheduler backend now supports `memory` / `mysql` / `tidb` entry paths with shared mysql-compatible SQL logic.
+- `owner`: user + assistant
+- `source`: conversation + `doc/progress/Phase-1-Progress.md`
+- `follow_up`: Run real TiDB integration verification and maintain SQL compatibility checklist.
