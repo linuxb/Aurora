@@ -2,13 +2,14 @@ package scheduler
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"aurora/apps/arqo/internal/model"
@@ -16,10 +17,6 @@ import (
 
 type MySQLStore struct {
 	db *sql.DB
-
-	sessionCounter atomic.Uint64
-	dagCounter     atomic.Uint64
-	taskCounter    atomic.Uint64
 }
 
 func NewMySQLStoreFromEnv() (*MySQLStore, error) {
@@ -69,17 +66,32 @@ func newMySQLStoreWithDB(db *sql.DB) *MySQLStore {
 	return &MySQLStore{db: db}
 }
 
-func (s *MySQLStore) CreateDemoSession(userID, intent string) Snapshot {
-	sessionID := fmt.Sprintf("sess_%06d", s.sessionCounter.Add(1))
-	dagID := fmt.Sprintf("dag_%06d", s.dagCounter.Add(1))
-	queryTaskID := fmt.Sprintf("task_%06d", s.taskCounter.Add(1))
-	summaryTaskID := fmt.Sprintf("task_%06d", s.taskCounter.Add(1))
-	mailTaskID := fmt.Sprintf("task_%06d", s.taskCounter.Add(1))
+func (s *MySQLStore) CreateDemoSession(userID, intent string) (Snapshot, error) {
+	sessionID, err := newPrefixedID("sess")
+	if err != nil {
+		return Snapshot{}, err
+	}
+	dagID, err := newPrefixedID("dag")
+	if err != nil {
+		return Snapshot{}, err
+	}
+	queryTaskID, err := newPrefixedID("task")
+	if err != nil {
+		return Snapshot{}, err
+	}
+	summaryTaskID, err := newPrefixedID("task")
+	if err != nil {
+		return Snapshot{}, err
+	}
+	mailTaskID, err := newPrefixedID("task")
+	if err != nil {
+		return Snapshot{}, err
+	}
 	now := time.Now().UTC()
 
 	tx, err := s.db.BeginTx(context.Background(), nil)
 	if err != nil {
-		panic(err)
+		return Snapshot{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -92,7 +104,7 @@ func (s *MySQLStore) CreateDemoSession(userID, intent string) Snapshot {
 		now,
 	)
 	if err != nil {
-		panic(err)
+		return Snapshot{}, err
 	}
 
 	_, err = tx.Exec(
@@ -104,28 +116,28 @@ func (s *MySQLStore) CreateDemoSession(userID, intent string) Snapshot {
 		now,
 	)
 	if err != nil {
-		panic(err)
+		return Snapshot{}, err
 	}
 
 	if err := s.insertTask(tx, queryTaskID, dagID, "QueryLog", "READY", 0, []string{}, []string{summaryTaskID}, now); err != nil {
-		panic(err)
+		return Snapshot{}, err
 	}
 	if err := s.insertTask(tx, summaryTaskID, dagID, "LLMSummarize", "PENDING", 1, []string{queryTaskID}, []string{mailTaskID}, now); err != nil {
-		panic(err)
+		return Snapshot{}, err
 	}
 	if err := s.insertTask(tx, mailTaskID, dagID, "SendEmail", "PENDING", 1, []string{summaryTaskID}, []string{}, now); err != nil {
-		panic(err)
+		return Snapshot{}, err
 	}
 
 	if err := tx.Commit(); err != nil {
-		panic(err)
+		return Snapshot{}, err
 	}
 
 	snapshot, err := s.GetSessionSnapshot(sessionID)
 	if err != nil {
-		panic(err)
+		return Snapshot{}, err
 	}
-	return snapshot
+	return snapshot, nil
 }
 
 func (s *MySQLStore) PullReadyTask(workerID string, ttl time.Duration) (*model.Task, error) {
@@ -550,6 +562,14 @@ func scanReadyTaskRow(row *sql.Row) (*model.Task, error) {
 	_ = json.Unmarshal([]byte(depsJSON), &task.Dependencies)
 	_ = json.Unmarshal([]byte(childrenJSON), &task.Children)
 	return &task, nil
+}
+
+func newPrefixedID(prefix string) (string, error) {
+	var bytes [12]byte
+	if _, err := rand.Read(bytes[:]); err != nil {
+		return "", fmt.Errorf("generate id failed: %w", err)
+	}
+	return prefix + "_" + hex.EncodeToString(bytes[:]), nil
 }
 
 func scanTaskRows(rows *sql.Rows) (*model.Task, error) {

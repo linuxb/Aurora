@@ -57,7 +57,7 @@ func NewStore() *Store {
 	}
 }
 
-func (s *Store) CreateDemoSession(userID, intent string) Snapshot {
+func (s *Store) CreateDemoSession(userID, intent string) (Snapshot, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -121,7 +121,7 @@ func (s *Store) CreateDemoSession(userID, intent string) Snapshot {
 	s.tasksByDAG[dagID] = []string{queryTaskID, summaryTaskID, mailTaskID}
 	s.rawDataByDAG[dagID] = make(map[string]any)
 
-	return s.snapshotLocked(sessionID)
+	return s.snapshotLocked(sessionID), nil
 }
 
 func (s *Store) PullReadyTask(workerID string, ttl time.Duration) (*model.Task, error) {

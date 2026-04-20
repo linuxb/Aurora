@@ -52,7 +52,11 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	snapshot := s.store.CreateDemoSession(req.UserID, req.Intent)
+	snapshot, err := s.store.CreateDemoSession(req.UserID, req.Intent)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "create_session_failed", err.Error())
+		return
+	}
 	s.publishEvent(r.Context(), events.Event{
 		SessionID: snapshot.Session.SessionID,
 		EventType: "SESSION_CREATED",

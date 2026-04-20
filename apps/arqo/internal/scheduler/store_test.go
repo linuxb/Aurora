@@ -9,7 +9,10 @@ import (
 
 func TestHappyPathDAGFlow(t *testing.T) {
 	store := NewStore()
-	snapshot := store.CreateDemoSession("u1", "summarize logs and email")
+	snapshot, err := store.CreateDemoSession("u1", "summarize logs and email")
+	if err != nil {
+		t.Fatalf("create session failed: %v", err)
+	}
 
 	if got, want := snapshot.DAG.Status, model.DAGStatusRunning; got != want {
 		t.Fatalf("unexpected dag status: got=%s want=%s", got, want)
@@ -80,7 +83,10 @@ func TestHappyPathDAGFlow(t *testing.T) {
 
 func TestFailureMovesDAGToReplanning(t *testing.T) {
 	store := NewStore()
-	snapshot := store.CreateDemoSession("u1", "test replanning")
+	snapshot, err := store.CreateDemoSession("u1", "test replanning")
+	if err != nil {
+		t.Fatalf("create session failed: %v", err)
+	}
 	task, err := store.PullReadyTask("worker-1", time.Minute)
 	if err != nil {
 		t.Fatalf("pull failed: %v", err)
