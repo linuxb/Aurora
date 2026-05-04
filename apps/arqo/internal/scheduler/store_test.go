@@ -228,3 +228,139 @@ func TestConcurrentCompleteNoDependencyUnderflow(t *testing.T) {
 		}
 	}
 }
+
+func TestJITExpansionRedirectsDownstreamAndReadiesLeaves(t *testing.T) {
+	store := NewStore()
+	snapshot, err := store.CreateJITDemoSession("u-jit", "investigate payment incident")
+	if err != nil {
+		t.Fatalf("create jit session failed: %v", err)
+	}
+
+	planner, err := store.PullReadyTask("planner-worker", time.Minute)
+	if err != nil {
+		t.Fatalf("pull planner failed: %v", err)
+	}
+	if planner.SkillName != "ReActPlanner" {
+		t.Fatalf("expected planner task, got=%s", planner.SkillName)
+	}
+
+	_, err = store.CompleteTask(CompleteTaskInput{
+		TaskID:   planner.TaskID,
+		WorkerID: "planner-worker",
+		Success:  true,
+		Summary:  "expanded",
+		RawData:  map[string]any{"decision": "expand"},
+		ExpansionPayload: &ExpansionPayload{
+			Reasoning: "need parallel collection",
+			NewNodes: []ExpansionNode{
+				{
+					NodeID:       "dyn_collect_a",
+					SkillName:    "QueryLog",
+					Dependencies: []string{planner.TaskID},
+				},
+				{
+					NodeID:       "dyn_collect_b",
+					SkillName:    "QueryLog",
+					Dependencies: []string{planner.TaskID},
+				},
+				{
+					NodeID:       "dyn_summary",
+					SkillName:    "LLMSummarize",
+					Dependencies: []string{"dyn_collect_a", "dyn_collect_b"},
+				},
+			},
+			DownstreamWiring: DownstreamWiring{
+				RedirectFrom: planner.TaskID,
+				RedirectTo:   []string{"dyn_summary"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("complete with expansion failed: %v", err)
+	}
+
+	final, err := store.GetSessionSnapshot(snapshot.Session.SessionID)
+	if err != nil {
+		t.Fatalf("snapshot failed: %v", err)
+	}
+
+	tasksBySkill := make(map[string][]model.Task)
+	tasksByID := make(map[string]model.Task)
+	for _, task := range final.Tasks {
+		tasksBySkill[task.SkillName] = append(tasksBySkill[task.SkillName], task)
+		tasksByID[task.TaskID] = task
+	}
+
+	if got, want := final.DAG.CurrentDepth, 2; got != want {
+		t.Fatalf("unexpected dag depth: got=%d want=%d", got, want)
+	}
+	if tasksByID["dyn_collect_a"].Status != model.TaskStatusReady {
+		t.Fatalf("expected dyn_collect_a READY, got=%s", tasksByID["dyn_collect_a"].Status)
+	}
+	if tasksByID["dyn_collect_b"].Status != model.TaskStatusReady {
+		t.Fatalf("expected dyn_collect_b READY, got=%s", tasksByID["dyn_collect_b"].Status)
+	}
+	if tasksByID["dyn_summary"].PendingDependenciesCount != 2 {
+		t.Fatalf("expected dyn_summary pending count=2, got=%d", tasksByID["dyn_summary"].PendingDependenciesCount)
+	}
+
+	finalTasks := tasksBySkill["SendEmail"]
+	if len(finalTasks) != 1 {
+		t.Fatalf("expected one final SendEmail task, got=%d", len(finalTasks))
+	}
+	if got := finalTasks[0].Dependencies; len(got) != 1 || got[0] != "dyn_summary" {
+		t.Fatalf("expected final task dependency redirected to dyn_summary, got=%v", got)
+	}
+	if got := tasksByID["dyn_summary"].Children; len(got) != 1 || got[0] != finalTasks[0].TaskID {
+		t.Fatalf("expected dyn_summary to wake final task, got children=%v", got)
+	}
+
+	leasedDynamic := make(map[string]struct{})
+	for i := 0; i < 2; i++ {
+		task, err := store.PullReadyTask("dynamic-worker", time.Minute)
+		if err != nil {
+			t.Fatalf("pull dynamic task failed: %v", err)
+		}
+		if task.TaskID != "dyn_collect_a" && task.TaskID != "dyn_collect_b" {
+			t.Fatalf("unexpected dynamic task lease: %s", task.TaskID)
+		}
+		if _, duplicate := leasedDynamic[task.TaskID]; duplicate {
+			t.Fatalf("duplicate dynamic task lease: %s", task.TaskID)
+		}
+		leasedDynamic[task.TaskID] = struct{}{}
+		if _, err := store.CompleteTask(CompleteTaskInput{
+			TaskID:   task.TaskID,
+			WorkerID: task.OwnerID,
+			Success:  true,
+			Summary:  "dynamic node done",
+			RawData:  map[string]any{"task_id": task.TaskID},
+		}); err != nil {
+			t.Fatalf("complete dynamic task failed: %v", err)
+		}
+	}
+
+	summaryTask, err := store.PullReadyTask("summary-worker", time.Minute)
+	if err != nil {
+		t.Fatalf("pull dynamic summary failed: %v", err)
+	}
+	if summaryTask.TaskID != "dyn_summary" {
+		t.Fatalf("unexpected summary task: %s", summaryTask.TaskID)
+	}
+	if _, err := store.CompleteTask(CompleteTaskInput{
+		TaskID:   summaryTask.TaskID,
+		WorkerID: summaryTask.OwnerID,
+		Success:  true,
+		Summary:  "summary done",
+		RawData:  "summary",
+	}); err != nil {
+		t.Fatalf("complete dynamic summary failed: %v", err)
+	}
+
+	readyFinal, err := store.PullReadyTask("final-worker", time.Minute)
+	if err != nil {
+		t.Fatalf("pull final task failed after dynamic summary: %v", err)
+	}
+	if readyFinal.SkillName != "SendEmail" {
+		t.Fatalf("expected final SendEmail task, got=%s", readyFinal.SkillName)
+	}
+}

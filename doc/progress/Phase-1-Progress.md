@@ -36,6 +36,15 @@
 - Added concurrency safety tests in scheduler memory engine:
   - concurrent pull duplicate-lease prevention
   - concurrent complete idempotency and dependency-counter underflow guard
+- Added JIT DAG expansion MVP:
+  - `planning_mode=jit` creates a static Planner backbone.
+  - `CompleteTask` accepts `expansion_payload` from `ReActPlanner`.
+  - Memory scheduler hot-plugs dynamic nodes, redirects downstream dependencies, and readies executable leaves.
+  - `worker-ts` includes a demo `ReActPlanner` skill that emits an expansion payload.
+- Migrated JIT expansion semantics into MySQL/TiDB transaction layer:
+  - SQL store now persists DAG guardrails (`current_depth`, `max_depth`) and task `parameters_json`.
+  - `CompleteTask` supports transactional expansion apply with depth guardrail and downstream dependency redirection.
+  - `planning_mode=jit` creation path is now supported by MySQL/TiDB scheduler backend.
 
 ## Integration Verification (2026-04-19T23:00:00+08:00)
 - Environment:

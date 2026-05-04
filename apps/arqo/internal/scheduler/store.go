@@ -17,13 +17,14 @@ var (
 )
 
 type CompleteTaskInput struct {
-	TaskID       string
-	WorkerID     string
-	Success      bool
-	Summary      string
-	RawData      any
-	ErrorCode    string
-	ErrorMessage string
+	TaskID           string
+	WorkerID         string
+	Success          bool
+	Summary          string
+	RawData          any
+	ErrorCode        string
+	ErrorMessage     string
+	ExpansionPayload *ExpansionPayload
 }
 
 type Snapshot struct {
@@ -78,6 +79,8 @@ func (s *Store) CreateDemoSession(userID, intent string) (Snapshot, error) {
 		UserID:         userID,
 		OriginalIntent: intent,
 		Status:         model.DAGStatusRunning,
+		CurrentDepth:   1,
+		MaxDepth:       10,
 		CreatedAt:      now,
 	}
 
@@ -124,6 +127,63 @@ func (s *Store) CreateDemoSession(userID, intent string) (Snapshot, error) {
 	return s.snapshotLocked(sessionID), nil
 }
 
+func (s *Store) CreateJITDemoSession(userID, intent string) (Snapshot, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	sessionID := fmt.Sprintf("sess_%06d", s.sessionCounter.Add(1))
+	dagID := fmt.Sprintf("dag_%06d", s.dagCounter.Add(1))
+	now := time.Now().UTC()
+
+	plannerTaskID := fmt.Sprintf("task_%06d", s.taskCounter.Add(1))
+	finalTaskID := fmt.Sprintf("task_%06d", s.taskCounter.Add(1))
+
+	session := model.Session{
+		SessionID: sessionID,
+		DAGID:     dagID,
+		UserID:    userID,
+		Intent:    intent,
+		CreatedAt: now,
+	}
+	dag := model.DAG{
+		DAGID:          dagID,
+		SessionID:      sessionID,
+		UserID:         userID,
+		OriginalIntent: intent,
+		Status:         model.DAGStatusRunning,
+		CurrentDepth:   1,
+		MaxDepth:       10,
+		CreatedAt:      now,
+	}
+	plannerTask := &model.Task{
+		TaskID:                   plannerTaskID,
+		DAGID:                    dagID,
+		SkillName:                "ReActPlanner",
+		Status:                   model.TaskStatusReady,
+		PendingDependenciesCount: 0,
+		Dependencies:             []string{},
+		Children:                 []string{finalTaskID},
+	}
+	finalTask := &model.Task{
+		TaskID:                   finalTaskID,
+		DAGID:                    dagID,
+		SkillName:                "SendEmail",
+		Status:                   model.TaskStatusPending,
+		PendingDependenciesCount: 1,
+		Dependencies:             []string{plannerTaskID},
+		Children:                 []string{},
+	}
+
+	s.sessions[sessionID] = session
+	s.dags[dagID] = dag
+	s.tasksByID[plannerTaskID] = plannerTask
+	s.tasksByID[finalTaskID] = finalTask
+	s.tasksByDAG[dagID] = []string{plannerTaskID, finalTaskID}
+	s.rawDataByDAG[dagID] = make(map[string]any)
+
+	return s.snapshotLocked(sessionID), nil
+}
+
 func (s *Store) PullReadyTask(workerID string, ttl time.Duration) (*model.Task, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -161,6 +221,14 @@ func (s *Store) CompleteTask(input CompleteTaskInput) (*model.Task, error) {
 	task.LastSummary = input.Summary
 
 	if input.Success {
+		if input.ExpansionPayload != nil {
+			if err := s.applyExpansionLocked(task, input); err != nil {
+				return nil, err
+			}
+			copied := *task
+			return &copied, nil
+		}
+
 		task.Status = model.TaskStatusSuccess
 		s.rawDataByDAG[task.DAGID][task.TaskID] = input.RawData
 
@@ -189,6 +257,192 @@ func (s *Store) CompleteTask(input CompleteTaskInput) (*model.Task, error) {
 
 	copied := *task
 	return &copied, nil
+}
+
+func (s *Store) applyExpansionLocked(task *model.Task, input CompleteTaskInput) error {
+	dag := s.dags[task.DAGID]
+	if dag.MaxDepth == 0 {
+		dag.MaxDepth = 10
+	}
+	if dag.CurrentDepth >= dag.MaxDepth {
+		task.Status = model.TaskStatusFailed
+		task.OwnerID = ""
+		task.ExpireAt = nil
+		task.LastErrorCode = "MAX_DEPTH_REACHED"
+		task.LastHumanReadableErrorMsg = "planner expansion max depth reached"
+		dag.Status = model.DAGStatusReplanning
+		dag.ReplanCount++
+		s.dags[task.DAGID] = dag
+		return ErrExpansionDepthExceeded
+	}
+
+	payload := input.ExpansionPayload
+	if err := s.validateExpansionLocked(task, payload); err != nil {
+		return err
+	}
+
+	originalChildren := append([]string{}, task.Children...)
+	tailSet := make(map[string]struct{}, len(payload.DownstreamWiring.RedirectTo))
+	for _, tailID := range payload.DownstreamWiring.RedirectTo {
+		tailSet[tailID] = struct{}{}
+	}
+
+	task.Status = model.TaskStatusSuccess
+	task.OwnerID = ""
+	task.ExpireAt = nil
+	task.LastSummary = input.Summary
+
+	newNodeIDs := make([]string, 0, len(payload.NewNodes))
+	directNodeIDs := make([]string, 0, len(payload.NewNodes))
+	for _, node := range payload.NewNodes {
+		pending := 0
+		for _, depID := range node.Dependencies {
+			dep := s.tasksByID[depID]
+			if dep == nil || dep.Status != model.TaskStatusSuccess {
+				pending++
+			}
+		}
+		status := model.TaskStatusPending
+		if pending == 0 {
+			status = model.TaskStatusReady
+		}
+		taskNode := &model.Task{
+			TaskID:                   node.NodeID,
+			DAGID:                    task.DAGID,
+			SkillName:                node.SkillName,
+			Status:                   status,
+			PendingDependenciesCount: pending,
+			Dependencies:             append([]string{}, node.Dependencies...),
+			Children:                 []string{},
+			Parameters:               node.Parameters,
+		}
+		s.tasksByID[node.NodeID] = taskNode
+		s.tasksByDAG[task.DAGID] = append(s.tasksByDAG[task.DAGID], node.NodeID)
+		newNodeIDs = append(newNodeIDs, node.NodeID)
+		if containsString(node.Dependencies, task.TaskID) {
+			directNodeIDs = append(directNodeIDs, node.NodeID)
+		}
+	}
+
+	for _, nodeID := range newNodeIDs {
+		node := s.tasksByID[nodeID]
+		for _, depID := range node.Dependencies {
+			dep := s.tasksByID[depID]
+			if dep != nil && !containsString(dep.Children, nodeID) {
+				dep.Children = append(dep.Children, nodeID)
+			}
+		}
+	}
+
+	for _, childID := range originalChildren {
+		child := s.tasksByID[childID]
+		if child == nil || !containsString(child.Dependencies, payload.DownstreamWiring.RedirectFrom) {
+			continue
+		}
+		child.Dependencies = replaceDependency(child.Dependencies, payload.DownstreamWiring.RedirectFrom, payload.DownstreamWiring.RedirectTo)
+		child.PendingDependenciesCount = countPendingDependencies(s.tasksByID, child.Dependencies)
+		for _, tailID := range payload.DownstreamWiring.RedirectTo {
+			tail := s.tasksByID[tailID]
+			if tail != nil && !containsString(tail.Children, childID) {
+				tail.Children = append(tail.Children, childID)
+			}
+		}
+	}
+
+	task.Children = directNodeIDs
+	s.rawDataByDAG[task.DAGID][task.TaskID] = map[string]any{
+		"summary":   input.Summary,
+		"expansion": payload,
+	}
+
+	dag.CurrentDepth++
+	s.dags[task.DAGID] = dag
+	s.refreshDAGStatusLocked(task.DAGID)
+	return nil
+}
+
+func (s *Store) validateExpansionLocked(task *model.Task, payload *ExpansionPayload) error {
+	if payload == nil || len(payload.NewNodes) == 0 {
+		return ErrExpansionInvalid
+	}
+	if payload.DownstreamWiring.RedirectFrom != task.TaskID {
+		return ErrExpansionInvalid
+	}
+	if len(payload.DownstreamWiring.RedirectTo) == 0 {
+		return ErrExpansionInvalid
+	}
+
+	seen := make(map[string]struct{}, len(payload.NewNodes))
+	newNodes := make(map[string]ExpansionNode, len(payload.NewNodes))
+	for _, node := range payload.NewNodes {
+		if node.NodeID == "" || node.SkillName == "" {
+			return ErrExpansionInvalid
+		}
+		if _, exists := s.tasksByID[node.NodeID]; exists {
+			return ErrExpansionInvalid
+		}
+		if _, duplicate := seen[node.NodeID]; duplicate {
+			return ErrExpansionInvalid
+		}
+		seen[node.NodeID] = struct{}{}
+		newNodes[node.NodeID] = node
+	}
+
+	for _, tailID := range payload.DownstreamWiring.RedirectTo {
+		if _, ok := newNodes[tailID]; !ok {
+			return ErrExpansionInvalid
+		}
+	}
+	for _, node := range payload.NewNodes {
+		for _, depID := range node.Dependencies {
+			if _, ok := s.tasksByID[depID]; ok {
+				continue
+			}
+			if _, ok := newNodes[depID]; ok {
+				continue
+			}
+			return ErrExpansionInvalid
+		}
+	}
+	return nil
+}
+
+func containsString(items []string, target string) bool {
+	for _, item := range items {
+		if item == target {
+			return true
+		}
+	}
+	return false
+}
+
+func replaceDependency(deps []string, oldID string, newIDs []string) []string {
+	out := make([]string, 0, len(deps)-1+len(newIDs))
+	for _, dep := range deps {
+		if dep == oldID {
+			for _, newID := range newIDs {
+				if !containsString(out, newID) {
+					out = append(out, newID)
+				}
+			}
+			continue
+		}
+		if !containsString(out, dep) {
+			out = append(out, dep)
+		}
+	}
+	return out
+}
+
+func countPendingDependencies(tasks map[string]*model.Task, deps []string) int {
+	pending := 0
+	for _, depID := range deps {
+		dep := tasks[depID]
+		if dep == nil || dep.Status != model.TaskStatusSuccess {
+			pending++
+		}
+	}
+	return pending
 }
 
 func (s *Store) ExpireRunningTasks(now time.Time) []string {

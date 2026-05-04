@@ -19,7 +19,7 @@ func TestMySQLStorePullReadyTaskSuccess(t *testing.T) {
 	store := newMySQLStoreWithDB(db)
 
 	mock.ExpectBegin()
-	mock.ExpectQuery(`SELECT task_id, dag_id, skill_name, status, pending_dependencies_count, dependencies_json, children_json`).
+	mock.ExpectQuery(`SELECT task_id, dag_id, skill_name, status, pending_dependencies_count, dependencies_json, children_json, parameters_json`).
 		WillReturnRows(
 			sqlmock.NewRows([]string{
 				"task_id",
@@ -29,6 +29,7 @@ func TestMySQLStorePullReadyTaskSuccess(t *testing.T) {
 				"pending_dependencies_count",
 				"dependencies_json",
 				"children_json",
+				"parameters_json",
 			}).AddRow(
 				"task_1",
 				"dag_1",
@@ -37,6 +38,7 @@ func TestMySQLStorePullReadyTaskSuccess(t *testing.T) {
 				0,
 				`[]`,
 				`["task_2"]`,
+				nil,
 			),
 		)
 	mock.ExpectExec(`UPDATE tasks SET status='RUNNING', owner_id=\?, expire_at=\? WHERE task_id=\?`).
@@ -86,7 +88,7 @@ func TestMySQLStorePullReadyTaskNoRows(t *testing.T) {
 	store := newMySQLStoreWithDB(db)
 
 	mock.ExpectBegin()
-	mock.ExpectQuery(`SELECT task_id, dag_id, skill_name, status, pending_dependencies_count, dependencies_json, children_json`).
+	mock.ExpectQuery(`SELECT task_id, dag_id, skill_name, status, pending_dependencies_count, dependencies_json, children_json, parameters_json`).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"task_id",
 			"dag_id",
@@ -95,6 +97,7 @@ func TestMySQLStorePullReadyTaskNoRows(t *testing.T) {
 			"pending_dependencies_count",
 			"dependencies_json",
 			"children_json",
+			"parameters_json",
 		}))
 	mock.ExpectRollback()
 

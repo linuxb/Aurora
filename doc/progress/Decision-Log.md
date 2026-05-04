@@ -96,3 +96,21 @@ This file records architecture and product decisions with traceability.
 - `owner`: user + assistant
 - `source`: conversation + `doc/progress/Phase-1-Progress.md`
 - `follow_up`: Run real TiDB integration verification and maintain SQL compatibility checklist.
+
+### 2026-05-04T00:00:00+08:00 | Phase 1 | JIT Planner node and dynamic DAG expansion
+- `status`: decided
+- `decision`: Introduce `ReActPlanner` as a first-class Planner node and support JIT DAG expansion through `SUCCESS_AND_EXPAND`-style completion payloads.
+- `context`: Static AOT DAGs are not expressive enough for ReAct-style agent execution.
+- `impact`: `arqo` can now grow a DAG at runtime in the memory scheduler, including downstream dependency redirection.
+- `owner`: user + assistant
+- `source`: conversation + `doc/design/arqo-jit.md`
+- `follow_up`: Add SQL-backed transactional expansion for MySQL/TiDB and define guardrail persistence fields.
+
+### 2026-05-05T10:30:00+08:00 | Phase 1 | MySQL/TiDB transactional JIT expansion parity
+- `status`: decided
+- `decision`: Apply the same JIT expansion semantics used by memory scheduler into MySQL/TiDB transaction flow, including depth guardrails and downstream rewiring.
+- `context`: JIT planner behavior must stay consistent across scheduler backends.
+- `impact`: `arqo` MySQL/TiDB backends now support planner-driven dynamic DAG growth atomically.
+- `owner`: user + assistant
+- `source`: conversation + `doc/progress/Phase-1-Progress.md`
+- `follow_up`: Execute real TiDB integration run and add backend-level concurrency tests.

@@ -37,8 +37,9 @@ func (s *Server) healthz(w http.ResponseWriter, _ *http.Request) {
 }
 
 type createSessionRequest struct {
-	UserID string `json:"user_id"`
-	Intent string `json:"intent"`
+	UserID       string `json:"user_id"`
+	Intent       string `json:"intent"`
+	PlanningMode string `json:"planning_mode"`
 }
 
 func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
@@ -52,7 +53,13 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	snapshot, err := s.store.CreateDemoSession(req.UserID, req.Intent)
+	var snapshot scheduler.Snapshot
+	var err error
+	if strings.EqualFold(strings.TrimSpace(req.PlanningMode), "jit") {
+		snapshot, err = s.store.CreateJITDemoSession(req.UserID, req.Intent)
+	} else {
+		snapshot, err = s.store.CreateDemoSession(req.UserID, req.Intent)
+	}
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "create_session_failed", err.Error())
 		return
@@ -117,12 +124,14 @@ func (s *Server) pullTask(w http.ResponseWriter, r *http.Request) {
 }
 
 type completeTaskRequest struct {
-	WorkerID     string `json:"worker_id"`
-	Success      bool   `json:"success"`
-	Summary      string `json:"summary"`
-	RawData      any    `json:"raw_data"`
-	ErrorCode    string `json:"error_code"`
-	ErrorMessage string `json:"error_message"`
+	Status           string                      `json:"status"`
+	WorkerID         string                      `json:"worker_id"`
+	Success          bool                        `json:"success"`
+	Summary          string                      `json:"summary"`
+	RawData          any                         `json:"raw_data"`
+	ErrorCode        string                      `json:"error_code"`
+	ErrorMessage     string                      `json:"error_message"`
+	ExpansionPayload *scheduler.ExpansionPayload `json:"expansion_payload"`
 }
 
 func (s *Server) completeTask(w http.ResponseWriter, r *http.Request) {
@@ -136,15 +145,23 @@ func (s *Server) completeTask(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "invalid_argument", "worker_id is required")
 		return
 	}
+	if strings.EqualFold(strings.TrimSpace(req.Status), "SUCCESS_AND_EXPAND") {
+		req.Success = true
+		if req.ExpansionPayload == nil {
+			respondError(w, http.StatusBadRequest, "invalid_argument", "expansion_payload is required for SUCCESS_AND_EXPAND")
+			return
+		}
+	}
 
 	task, err := s.store.CompleteTask(scheduler.CompleteTaskInput{
-		TaskID:       taskID,
-		WorkerID:     req.WorkerID,
-		Success:      req.Success,
-		Summary:      req.Summary,
-		RawData:      req.RawData,
-		ErrorCode:    req.ErrorCode,
-		ErrorMessage: req.ErrorMessage,
+		TaskID:           taskID,
+		WorkerID:         req.WorkerID,
+		Success:          req.Success,
+		Summary:          req.Summary,
+		RawData:          req.RawData,
+		ErrorCode:        req.ErrorCode,
+		ErrorMessage:     req.ErrorMessage,
+		ExpansionPayload: req.ExpansionPayload,
 	})
 	if err != nil {
 		status := http.StatusInternalServerError
@@ -153,6 +170,12 @@ func (s *Server) completeTask(w http.ResponseWriter, r *http.Request) {
 			status = http.StatusNotFound
 		case errors.Is(err, scheduler.ErrTaskNotRunnable):
 			status = http.StatusConflict
+		case errors.Is(err, scheduler.ErrExpansionInvalid):
+			status = http.StatusBadRequest
+		case errors.Is(err, scheduler.ErrExpansionDepthExceeded):
+			status = http.StatusConflict
+		case errors.Is(err, scheduler.ErrExpansionNotImplemented):
+			status = http.StatusNotImplemented
 		}
 		respondError(w, status, "task_completion_failed", err.Error())
 		return
@@ -162,6 +185,8 @@ func (s *Server) completeTask(w http.ResponseWriter, r *http.Request) {
 		eventType := "TASK_COMPLETED"
 		if !req.Success {
 			eventType = "TASK_FAILED"
+		} else if req.ExpansionPayload != nil {
+			eventType = "TASK_EXPANDED"
 		}
 		s.publishEvent(r.Context(), events.Event{
 			SessionID: sessionID,
