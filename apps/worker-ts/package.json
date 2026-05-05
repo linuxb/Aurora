@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "node --experimental-strip-types src/index.ts",
     "start": "node --experimental-strip-types src/index.ts",
-    "check": "node --experimental-strip-types src/self-check.ts"
+    "check": "tsc -p tsconfig.json --noEmit",
+    "self-check": "node --experimental-strip-types src/self-check.ts"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",

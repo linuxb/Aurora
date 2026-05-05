@@ -43,7 +43,50 @@ const sendEmail: SkillRunner = async (taskID) => {
   };
 };
 
+const reactPlanner: SkillRunner = async (taskID) => {
+  await pause(100);
+  const collectA = `${taskID}_dyn_collect_a`;
+  const collectB = `${taskID}_dyn_collect_b`;
+  const summarize = `${taskID}_dyn_summary`;
+
+  return {
+    raw_data: {
+      task_id: taskID,
+      planning_mode: "jit",
+      decision: "expand",
+    },
+    summary: "Planner expanded the DAG with two collection tasks and one dynamic summary task.",
+    expansion_payload: {
+      reasoning: "The goal needs parallel evidence collection before final delivery.",
+      new_nodes: [
+        {
+          node_id: collectA,
+          skill_name: "QueryLog",
+          parameters: { source: "payment-api" },
+          dependencies: [taskID],
+        },
+        {
+          node_id: collectB,
+          skill_name: "QueryLog",
+          parameters: { source: "payment-db" },
+          dependencies: [taskID],
+        },
+        {
+          node_id: summarize,
+          skill_name: "LLMSummarize",
+          dependencies: [collectA, collectB],
+        },
+      ],
+      downstream_wiring: {
+        redirect_from: taskID,
+        redirect_to: [summarize],
+      },
+    },
+  };
+};
+
 export const skills: Record<string, SkillRunner> = {
+  ReActPlanner: reactPlanner,
   QueryLog: queryLog,
   LLMSummarize: llmSummarize,
   SendEmail: sendEmail,

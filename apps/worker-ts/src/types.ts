@@ -1,6 +1,25 @@
 export interface SkillResponse {
   raw_data: string | Record<string, unknown>;
   summary: string;
+  expansion_payload?: ExpansionPayload;
+}
+
+export interface ExpansionPayload {
+  reasoning: string;
+  new_nodes: ExpansionNode[];
+  downstream_wiring: DownstreamWiring;
+}
+
+export interface ExpansionNode {
+  node_id: string;
+  skill_name: string;
+  parameters?: Record<string, unknown>;
+  dependencies: string[];
+}
+
+export interface DownstreamWiring {
+  redirect_from: string;
+  redirect_to: string[];
 }
 
 export class AuroraSkillError extends Error {
@@ -33,4 +52,5 @@ export interface Task {
   skill_name: string;
   status: "PENDING" | "READY" | "RUNNING" | "SUCCESS" | "FAILED";
   pending_dependencies_count: number;
+  parameters?: Record<string, unknown>;
 }

@@ -76,9 +76,11 @@ async function runOnce(): Promise<boolean> {
     const response = await runSkill(task.skill_name, task.task_id);
     await emitTelemetry("NODE_FINISH", task.task_id, response.summary);
     await completeTask(task.task_id, {
+      status: response.expansion_payload ? "SUCCESS_AND_EXPAND" : "SUCCESS",
       success: true,
       summary: response.summary,
       raw_data: response.raw_data,
+      expansion_payload: response.expansion_payload,
     });
     return true;
   } catch (error) {
