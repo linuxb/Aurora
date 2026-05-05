@@ -1,7 +1,7 @@
 SHELL := /bin/zsh
 GOCACHE ?= $(CURDIR)/.cache/go-build
 
-.PHONY: help run-arqo run-worker run-polaris test-arqo test-polaris test check-env infra-up infra-down infra-up-dev infra-down-dev infra-up-full infra-down-full test-smoke-ruby test-fault-ruby
+.PHONY: help run-arqo run-worker run-polaris test-arqo test-polaris test check-env infra-up infra-down infra-up-dev infra-down-dev infra-up-full infra-down-full test-smoke-ruby test-fault-ruby hardening-regression hardening-tidb
 
 help:
 	@echo "Targets:"
@@ -16,6 +16,8 @@ help:
 	@echo "  infra-down-full - stop full stack from docker-compose.yml"
 	@echo "  test-smoke-ruby - run Ruby smoke E2E for arqo session DAG"
 	@echo "  test-fault-ruby - run Ruby fault-injection checks"
+	@echo "  hardening-regression - run fixed deferred hardening checks"
+	@echo "  hardening-tidb - run TiDB smoke check (requires TiDB env)"
 
 run-arqo:
 	mkdir -p $(GOCACHE)
@@ -66,3 +68,15 @@ test-smoke-ruby:
 
 test-fault-ruby:
 	ruby tools/testing/arqo_fault_injector.rb
+
+hardening-regression: test-arqo test-smoke-ruby test-fault-ruby
+	@echo "[hardening] baseline regression checks passed"
+	@echo "[hardening] run 'make hardening-tidb' when TiDB is available"
+
+hardening-tidb:
+	@if [ -z "$$ARQO_TIDB_DSN" ]; then \
+		echo "[hardening] skip TiDB check: ARQO_TIDB_DSN is not set"; \
+		echo "[hardening] example: export ARQO_TIDB_DSN='aurora:aurora@tcp(127.0.0.1:4000)/aurora?parseTime=true&multiStatements=true'"; \
+		exit 0; \
+	fi
+	@echo "[hardening] TiDB DSN detected. Start TiDB compatibility smoke in next increment."

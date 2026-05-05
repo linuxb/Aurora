@@ -9,6 +9,11 @@
 - 当决策被修改时，不覆盖原记录；新增一条 `status=superseded` 或新版本记录，并指向被替代项。
 - 每个 phase 结束时，补一条“phase closure”记录，包含未决项和风险说明，方便复盘。
 
+## Deferred Hardening 固定节奏
+- Deferred hardening 项不阻塞主线 phase 研发推进，但必须固定回归。
+- 固定回归规则见：`doc/progress/Hardening-Cadence.md`。
+- 每次 phase closure 需要明确记录：哪些 hardening 已完成，哪些延期，延期风险是否可接受。
+
 ## Phase 文档分工
 - `doc/progress/Phase-Plan.md`: 仅维护全局阶段目标、验收标准与整体节奏。
 - `doc/progress/Phase-0-Progress.md`, `doc/progress/Phase-1-Progress.md`, ...: 维护阶段执行进度、阶段内待决策点、讨论结论。
@@ -147,3 +152,4 @@
 - Phase 0 progress: `doc/progress/Phase-0-Progress.md`
 - Phase 1 progress: `doc/progress/Phase-1-Progress.md`
 - Decision index: `doc/progress/Decision-Log.md`
+- Hardening cadence: `doc/progress/Hardening-Cadence.md`

@@ -114,3 +114,21 @@ This file records architecture and product decisions with traceability.
 - `owner`: user + assistant
 - `source`: conversation + `doc/progress/Phase-1-Progress.md`
 - `follow_up`: Execute real TiDB integration run and add backend-level concurrency tests.
+
+### 2026-05-05T11:20:00+08:00 | Phase 1 | Pending hardening items do not block roadmap
+- `status`: decided
+- `decision`: Treat Phase 1 remaining items (persistent-store concurrency tests, real TiDB verification) as hardening track, and continue next-phase core delivery first.
+- `context`: User prefers overall roadmap velocity and defer optimization items for targeted follow-up.
+- `impact`: Mainline development proceeds without waiting for full hardening closure; risk is tracked explicitly in phase progress.
+- `owner`: user + assistant
+- `source`: conversation + `doc/progress/Phase-1-Progress.md`
+- `follow_up`: Maintain a recurring hardening pass and run the deferred checks before release milestone.
+
+### 2026-05-05T11:45:00+08:00 | Phase 1 | Deferred hardening fixed regression cadence
+- `status`: decided
+- `decision`: Adopt a fixed cadence for deferred hardening: weekly regression pass + mandatory phase-closure pass + release-gate completion.
+- `context`: Keep feature velocity while preventing long-tail quality risk from drifting.
+- `impact`: Hardening execution becomes operationalized and traceable across phases.
+- `owner`: user + assistant
+- `source`: conversation + `doc/progress/Hardening-Cadence.md`
+- `follow_up`: Execute cadence in next weekly cycle and record first run result.
