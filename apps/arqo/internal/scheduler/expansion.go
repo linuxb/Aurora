@@ -5,6 +5,7 @@ import "errors"
 var (
 	ErrExpansionInvalid        = errors.New("expansion payload is invalid")
 	ErrExpansionDepthExceeded  = errors.New("expansion max depth reached")
+	ErrExpansionNotAllowed     = errors.New("expansion is only allowed for expanding steps")
 	ErrExpansionNotImplemented = errors.New("expansion is not implemented for this scheduler backend")
 )
 

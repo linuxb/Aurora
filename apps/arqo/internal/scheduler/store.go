@@ -91,6 +91,7 @@ func (s *Store) CreateDemoSession(userID, intent string) (Snapshot, error) {
 	queryTask := &model.Task{
 		TaskID:                   queryTaskID,
 		DAGID:                    dagID,
+		NodeType:                 model.NodeTypeSkillSink,
 		SkillName:                "QueryLog",
 		Status:                   model.TaskStatusReady,
 		PendingDependenciesCount: 0,
@@ -100,6 +101,7 @@ func (s *Store) CreateDemoSession(userID, intent string) (Snapshot, error) {
 	summaryTask := &model.Task{
 		TaskID:                   summaryTaskID,
 		DAGID:                    dagID,
+		NodeType:                 model.NodeTypeSkillSink,
 		SkillName:                "LLMSummarize",
 		Status:                   model.TaskStatusPending,
 		PendingDependenciesCount: 1,
@@ -109,6 +111,7 @@ func (s *Store) CreateDemoSession(userID, intent string) (Snapshot, error) {
 	mailTask := &model.Task{
 		TaskID:                   mailTaskID,
 		DAGID:                    dagID,
+		NodeType:                 model.NodeTypeSkillSink,
 		SkillName:                "SendEmail",
 		Status:                   model.TaskStatusPending,
 		PendingDependenciesCount: 1,
@@ -158,6 +161,7 @@ func (s *Store) CreateJITDemoSession(userID, intent string) (Snapshot, error) {
 	plannerTask := &model.Task{
 		TaskID:                   plannerTaskID,
 		DAGID:                    dagID,
+		NodeType:                 model.NodeTypeExpandPlanning,
 		SkillName:                "ReActPlanner",
 		Status:                   model.TaskStatusReady,
 		PendingDependenciesCount: 0,
@@ -167,6 +171,7 @@ func (s *Store) CreateJITDemoSession(userID, intent string) (Snapshot, error) {
 	finalTask := &model.Task{
 		TaskID:                   finalTaskID,
 		DAGID:                    dagID,
+		NodeType:                 model.NodeTypeSkillSink,
 		SkillName:                "SendEmail",
 		Status:                   model.TaskStatusPending,
 		PendingDependenciesCount: 1,
@@ -228,6 +233,11 @@ func (s *Store) CreateSessionFromPlan(userID, intent string, tasks []SessionTask
 	s.tasksByDAG[dagID] = make([]string, 0, len(tasks))
 
 	for _, spec := range tasks {
+		nodeType := spec.NodeType
+		parsedNodeType, err := model.ParseNodeType(string(nodeType))
+		if err != nil {
+			return Snapshot{}, err
+		}
 		taskID := refToTaskID[spec.RefID]
 		deps := make([]string, 0, len(spec.Dependencies))
 		for _, depRef := range spec.Dependencies {
@@ -244,6 +254,7 @@ func (s *Store) CreateSessionFromPlan(userID, intent string, tasks []SessionTask
 		task := &model.Task{
 			TaskID:                   taskID,
 			DAGID:                    dagID,
+			NodeType:                 parsedNodeType,
 			SkillName:                spec.SkillName,
 			Status:                   status,
 			PendingDependenciesCount: len(deps),
@@ -296,6 +307,9 @@ func (s *Store) CompleteTask(input CompleteTaskInput) (*model.Task, error) {
 
 	if input.Success {
 		if input.ExpansionPayload != nil {
+			if task.NodeType != model.NodeTypeExpandPlanning {
+				return nil, ErrExpansionNotAllowed
+			}
 			if err := s.applyExpansionLocked(task, input); err != nil {
 				return nil, err
 			}
@@ -383,6 +397,7 @@ func (s *Store) applyExpansionLocked(task *model.Task, input CompleteTaskInput) 
 		taskNode := &model.Task{
 			TaskID:                   node.NodeID,
 			DAGID:                    task.DAGID,
+			NodeType:                 model.NodeTypeSkillSink,
 			SkillName:                node.SkillName,
 			Status:                   status,
 			PendingDependenciesCount: pending,

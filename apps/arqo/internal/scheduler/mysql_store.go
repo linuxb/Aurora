@@ -135,13 +135,13 @@ func (s *MySQLStore) CreateDemoSession(userID, intent string) (Snapshot, error) 
 		return Snapshot{}, err
 	}
 
-	if err := s.insertTask(tx, queryTaskID, dagID, "QueryLog", "READY", 0, []string{}, []string{summaryTaskID}, nil, now); err != nil {
+	if err := s.insertTask(tx, queryTaskID, dagID, string(model.NodeTypeSkillSink), "QueryLog", "READY", 0, []string{}, []string{summaryTaskID}, nil, now); err != nil {
 		return Snapshot{}, err
 	}
-	if err := s.insertTask(tx, summaryTaskID, dagID, "LLMSummarize", "PENDING", 1, []string{queryTaskID}, []string{mailTaskID}, nil, now); err != nil {
+	if err := s.insertTask(tx, summaryTaskID, dagID, string(model.NodeTypeSkillSink), "LLMSummarize", "PENDING", 1, []string{queryTaskID}, []string{mailTaskID}, nil, now); err != nil {
 		return Snapshot{}, err
 	}
-	if err := s.insertTask(tx, mailTaskID, dagID, "SendEmail", "PENDING", 1, []string{summaryTaskID}, []string{}, nil, now); err != nil {
+	if err := s.insertTask(tx, mailTaskID, dagID, string(model.NodeTypeSkillSink), "SendEmail", "PENDING", 1, []string{summaryTaskID}, []string{}, nil, now); err != nil {
 		return Snapshot{}, err
 	}
 
@@ -203,10 +203,10 @@ func (s *MySQLStore) CreateJITDemoSession(userID, intent string) (Snapshot, erro
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if err := s.insertTask(tx, plannerTaskID, dagID, "ReActPlanner", "READY", 0, []string{}, []string{finalTaskID}, nil, now); err != nil {
+	if err := s.insertTask(tx, plannerTaskID, dagID, string(model.NodeTypeExpandPlanning), "ReActPlanner", "READY", 0, []string{}, []string{finalTaskID}, nil, now); err != nil {
 		return Snapshot{}, err
 	}
-	if err := s.insertTask(tx, finalTaskID, dagID, "SendEmail", "PENDING", 1, []string{plannerTaskID}, []string{}, nil, now); err != nil {
+	if err := s.insertTask(tx, finalTaskID, dagID, string(model.NodeTypeSkillSink), "SendEmail", "PENDING", 1, []string{plannerTaskID}, []string{}, nil, now); err != nil {
 		return Snapshot{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -253,6 +253,12 @@ func (s *MySQLStore) CreateSessionFromPlan(userID, intent string, tasks []Sessio
 
 	runtimeTasks := make([]runtimeTask, 0, len(tasks))
 	for _, spec := range tasks {
+		nodeType := spec.NodeType
+		parsedNodeType, parseErr := model.ParseNodeType(string(nodeType))
+		if parseErr != nil {
+			return Snapshot{}, parseErr
+		}
+		spec.NodeType = parsedNodeType
 		deps := make([]string, 0, len(spec.Dependencies))
 		for _, depRef := range spec.Dependencies {
 			deps = append(deps, refToTaskID[depRef])
@@ -296,7 +302,7 @@ func (s *MySQLStore) CreateSessionFromPlan(userID, intent string, tasks []Sessio
 		return Snapshot{}, err
 	}
 	for _, rt := range runtimeTasks {
-		if err := s.insertTask(tx, rt.taskID, dagID, rt.spec.SkillName, rt.taskStatus, rt.pending, rt.deps, rt.children, rt.spec.Parameters, now); err != nil {
+		if err := s.insertTask(tx, rt.taskID, dagID, string(rt.spec.NodeType), rt.spec.SkillName, rt.taskStatus, rt.pending, rt.deps, rt.children, rt.spec.Parameters, now); err != nil {
 			return Snapshot{}, err
 		}
 	}
@@ -314,7 +320,7 @@ func (s *MySQLStore) PullReadyTask(workerID string, ttl time.Duration) (*model.T
 	defer func() { _ = tx.Rollback() }()
 
 	row := tx.QueryRow(`
-SELECT task_id, dag_id, skill_name, status, pending_dependencies_count, dependencies_json, children_json, parameters_json
+SELECT task_id, dag_id, node_type, skill_name, status, pending_dependencies_count, dependencies_json, children_json, parameters_json
 FROM tasks
 WHERE status = 'READY'
 ORDER BY created_at ASC
@@ -362,6 +368,9 @@ func (s *MySQLStore) CompleteTask(input CompleteTaskInput) (*model.Task, error) 
 		return nil, ErrTaskNotRunnable
 	}
 	if input.Success && input.ExpansionPayload != nil {
+		if current.NodeType != model.NodeTypeExpandPlanning {
+			return nil, ErrExpansionNotAllowed
+		}
 		if err := s.applyExpansionTx(tx, current, input); err != nil {
 			return nil, err
 		}
@@ -515,7 +524,7 @@ WHERE s.session_id = ?`, sessionID)
 	dag.Status = model.DAGStatus(dagStatus)
 
 	rows, err := s.db.Query(`
-SELECT task_id, dag_id, skill_name, status, pending_dependencies_count, owner_id, expire_at,
+SELECT task_id, dag_id, node_type, skill_name, status, pending_dependencies_count, owner_id, expire_at,
        dependencies_json, children_json, parameters_json, last_summary, last_error_code, last_human_readable_error_msg
 FROM tasks
 WHERE dag_id = ?
@@ -597,6 +606,7 @@ CREATE TABLE IF NOT EXISTS dags (
 CREATE TABLE IF NOT EXISTS tasks (
     task_id VARCHAR(64) PRIMARY KEY,
     dag_id VARCHAR(64) NOT NULL,
+    node_type VARCHAR(32) NOT NULL DEFAULT 'SKILL_SINK',
     skill_name VARCHAR(64) NOT NULL,
     status VARCHAR(20) NOT NULL,
     pending_dependencies_count INT NOT NULL,
@@ -624,22 +634,25 @@ CREATE TABLE IF NOT EXISTS task_raw_data (
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("ensure schema failed: %w", err)
 	}
+	if _, err := s.db.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS node_type VARCHAR(32) NOT NULL DEFAULT 'SKILL_SINK'`); err != nil {
+		return fmt.Errorf("ensure node_type column failed: %w", err)
+	}
 	return nil
 }
 
-func (s *MySQLStore) insertTask(tx *sql.Tx, taskID, dagID, skillName, status string, pendingCount int, deps, children []string, params map[string]any, createdAt time.Time) error {
+func (s *MySQLStore) insertTask(tx *sql.Tx, taskID, dagID, nodeType, skillName, status string, pendingCount int, deps, children []string, params map[string]any, createdAt time.Time) error {
 	depsJSON, _ := json.Marshal(deps)
 	childrenJSON, _ := json.Marshal(children)
 	paramsJSON, _ := json.Marshal(params)
 	_, err := tx.Exec(`
-INSERT INTO tasks (task_id, dag_id, skill_name, status, pending_dependencies_count, dependencies_json, children_json, parameters_json, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, taskID, dagID, skillName, status, pendingCount, string(depsJSON), string(childrenJSON), string(paramsJSON), createdAt)
+INSERT INTO tasks (task_id, dag_id, node_type, skill_name, status, pending_dependencies_count, dependencies_json, children_json, parameters_json, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, taskID, dagID, nodeType, skillName, status, pendingCount, string(depsJSON), string(childrenJSON), string(paramsJSON), createdAt)
 	return err
 }
 
 func (s *MySQLStore) getTaskByIDTx(tx *sql.Tx, taskID string) (*model.Task, error) {
 	row := tx.QueryRow(`
-SELECT task_id, dag_id, skill_name, status, pending_dependencies_count, owner_id, expire_at,
+SELECT task_id, dag_id, node_type, skill_name, status, pending_dependencies_count, owner_id, expire_at,
        dependencies_json, children_json, parameters_json, last_summary, last_error_code, last_human_readable_error_msg
 FROM tasks
 WHERE task_id = ?
@@ -762,7 +775,7 @@ WHERE task_id=?`, input.Summary, planner.TaskID)
 		if pending == 0 {
 			status = "READY"
 		}
-		if err := s.insertTask(tx, node.NodeID, planner.DAGID, node.SkillName, status, pending, node.Dependencies, []string{}, node.Parameters, time.Now().UTC()); err != nil {
+		if err := s.insertTask(tx, node.NodeID, planner.DAGID, string(model.NodeTypeSkillSink), node.SkillName, status, pending, node.Dependencies, []string{}, node.Parameters, time.Now().UTC()); err != nil {
 			return err
 		}
 	}
@@ -875,6 +888,7 @@ ON DUPLICATE KEY UPDATE raw_data_json=VALUES(raw_data_json), updated_at=VALUES(u
 
 func scanTaskRow(row *sql.Row) (*model.Task, error) {
 	var task model.Task
+	var rawNodeType string
 	var status string
 	var depsJSON, childrenJSON string
 	var paramsJSON sql.NullString
@@ -885,6 +899,7 @@ func scanTaskRow(row *sql.Row) (*model.Task, error) {
 	if err := row.Scan(
 		&task.TaskID,
 		&task.DAGID,
+		&rawNodeType,
 		&task.SkillName,
 		&status,
 		&task.PendingDependenciesCount,
@@ -900,6 +915,11 @@ func scanTaskRow(row *sql.Row) (*model.Task, error) {
 		return nil, err
 	}
 
+	nodeType, err := model.ParseNodeType(rawNodeType)
+	if err != nil {
+		return nil, err
+	}
+	task.NodeType = nodeType
 	task.Status = model.TaskStatus(status)
 	if owner.Valid {
 		task.OwnerID = owner.String
@@ -928,6 +948,7 @@ func scanTaskRow(row *sql.Row) (*model.Task, error) {
 
 func scanReadyTaskRow(row *sql.Row) (*model.Task, error) {
 	var task model.Task
+	var rawNodeType string
 	var status string
 	var depsJSON, childrenJSON string
 	var paramsJSON sql.NullString
@@ -935,6 +956,7 @@ func scanReadyTaskRow(row *sql.Row) (*model.Task, error) {
 	if err := row.Scan(
 		&task.TaskID,
 		&task.DAGID,
+		&rawNodeType,
 		&task.SkillName,
 		&status,
 		&task.PendingDependenciesCount,
@@ -945,6 +967,11 @@ func scanReadyTaskRow(row *sql.Row) (*model.Task, error) {
 		return nil, err
 	}
 
+	nodeType, err := model.ParseNodeType(rawNodeType)
+	if err != nil {
+		return nil, err
+	}
+	task.NodeType = nodeType
 	task.Status = model.TaskStatus(status)
 	_ = json.Unmarshal([]byte(depsJSON), &task.Dependencies)
 	_ = json.Unmarshal([]byte(childrenJSON), &task.Children)
@@ -964,6 +991,7 @@ func newPrefixedID(prefix string) (string, error) {
 
 func scanTaskRows(rows *sql.Rows) (*model.Task, error) {
 	var task model.Task
+	var rawNodeType string
 	var status string
 	var depsJSON, childrenJSON string
 	var paramsJSON sql.NullString
@@ -974,6 +1002,7 @@ func scanTaskRows(rows *sql.Rows) (*model.Task, error) {
 	if err := rows.Scan(
 		&task.TaskID,
 		&task.DAGID,
+		&rawNodeType,
 		&task.SkillName,
 		&status,
 		&task.PendingDependenciesCount,
@@ -989,6 +1018,11 @@ func scanTaskRows(rows *sql.Rows) (*model.Task, error) {
 		return nil, err
 	}
 
+	nodeType, err := model.ParseNodeType(rawNodeType)
+	if err != nil {
+		return nil, err
+	}
+	task.NodeType = nodeType
 	task.Status = model.TaskStatus(status)
 	if owner.Valid {
 		task.OwnerID = owner.String

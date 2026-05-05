@@ -61,6 +61,7 @@ func toSessionTaskSpecs(nodes []planner.Node) []scheduler.SessionTaskSpec {
 	for _, node := range nodes {
 		specs = append(specs, scheduler.SessionTaskSpec{
 			RefID:        node.NodeID,
+			NodeType:     node.NodeType,
 			SkillName:    node.SkillName,
 			Parameters:   node.Parameters,
 			Dependencies: node.Dependencies,
@@ -212,6 +213,8 @@ func (s *Server) completeTask(w http.ResponseWriter, r *http.Request) {
 			status = http.StatusConflict
 		case errors.Is(err, scheduler.ErrExpansionInvalid):
 			status = http.StatusBadRequest
+		case errors.Is(err, scheduler.ErrExpansionNotAllowed):
+			status = http.StatusConflict
 		case errors.Is(err, scheduler.ErrExpansionDepthExceeded):
 			status = http.StatusConflict
 		case errors.Is(err, scheduler.ErrExpansionNotImplemented):

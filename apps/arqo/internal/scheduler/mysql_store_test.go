@@ -19,11 +19,12 @@ func TestMySQLStorePullReadyTaskSuccess(t *testing.T) {
 	store := newMySQLStoreWithDB(db)
 
 	mock.ExpectBegin()
-	mock.ExpectQuery(`SELECT task_id, dag_id, skill_name, status, pending_dependencies_count, dependencies_json, children_json, parameters_json`).
+	mock.ExpectQuery(`SELECT task_id, dag_id, node_type, skill_name, status, pending_dependencies_count, dependencies_json, children_json, parameters_json`).
 		WillReturnRows(
 			sqlmock.NewRows([]string{
 				"task_id",
 				"dag_id",
+				"node_type",
 				"skill_name",
 				"status",
 				"pending_dependencies_count",
@@ -33,6 +34,7 @@ func TestMySQLStorePullReadyTaskSuccess(t *testing.T) {
 			}).AddRow(
 				"task_1",
 				"dag_1",
+				"SKILL_SINK",
 				"QueryLog",
 				"READY",
 				0,
@@ -56,6 +58,9 @@ func TestMySQLStorePullReadyTaskSuccess(t *testing.T) {
 	}
 	if got, want := task.Status, model.TaskStatusRunning; got != want {
 		t.Fatalf("unexpected task status: got=%s want=%s", got, want)
+	}
+	if got, want := task.NodeType, model.NodeTypeSkillSink; got != want {
+		t.Fatalf("unexpected node_type: got=%s want=%s", got, want)
 	}
 	if got, want := task.OwnerID, "worker-1"; got != want {
 		t.Fatalf("unexpected owner_id: got=%s want=%s", got, want)
@@ -88,10 +93,11 @@ func TestMySQLStorePullReadyTaskNoRows(t *testing.T) {
 	store := newMySQLStoreWithDB(db)
 
 	mock.ExpectBegin()
-	mock.ExpectQuery(`SELECT task_id, dag_id, skill_name, status, pending_dependencies_count, dependencies_json, children_json, parameters_json`).
+	mock.ExpectQuery(`SELECT task_id, dag_id, node_type, skill_name, status, pending_dependencies_count, dependencies_json, children_json, parameters_json`).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"task_id",
 			"dag_id",
+			"node_type",
 			"skill_name",
 			"status",
 			"pending_dependencies_count",

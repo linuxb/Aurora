@@ -1,10 +1,15 @@
 package model
 
-import "time"
+import (
+	"fmt"
+	"strings"
+	"time"
+)
 
 type DAGStatus string
 
 type TaskStatus string
+type NodeType string
 
 const (
 	DAGStatusRunning    DAGStatus = "RUNNING"
@@ -21,6 +26,23 @@ const (
 	TaskStatusFailed  TaskStatus = "FAILED"
 )
 
+const (
+	NodeTypeSkillSink      NodeType = "SKILL_SINK"
+	NodeTypeExpandPlanning NodeType = "EXPAND_PLANNING"
+)
+
+func ParseNodeType(raw string) (NodeType, error) {
+	normalized := strings.ToUpper(strings.TrimSpace(raw))
+	switch normalized {
+	case string(NodeTypeSkillSink):
+		return NodeTypeSkillSink, nil
+	case string(NodeTypeExpandPlanning), "EXPANDING":
+		return NodeTypeExpandPlanning, nil
+	default:
+		return "", fmt.Errorf("invalid node_type %q", raw)
+	}
+}
+
 type DAG struct {
 	DAGID          string    `json:"dag_id"`
 	SessionID      string    `json:"session_id"`
@@ -36,6 +58,7 @@ type DAG struct {
 type Task struct {
 	TaskID                    string         `json:"task_id"`
 	DAGID                     string         `json:"dag_id"`
+	NodeType                  NodeType       `json:"node_type"`
 	SkillName                 string         `json:"skill_name"`
 	Status                    TaskStatus     `json:"status"`
 	PendingDependenciesCount  int            `json:"pending_dependencies_count"`

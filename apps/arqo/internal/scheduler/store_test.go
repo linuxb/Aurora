@@ -365,12 +365,59 @@ func TestJITExpansionRedirectsDownstreamAndReadiesLeaves(t *testing.T) {
 	}
 }
 
+func TestExpansionRejectedForSkillSinkNode(t *testing.T) {
+	store := NewStore()
+	snapshot, err := store.CreateDemoSession("u-sink", "plain flow")
+	if err != nil {
+		t.Fatalf("create session failed: %v", err)
+	}
+	task, err := store.PullReadyTask("worker-1", time.Minute)
+	if err != nil {
+		t.Fatalf("pull failed: %v", err)
+	}
+	if task.NodeType != model.NodeTypeSkillSink {
+		t.Fatalf("expected skill sink node, got=%s", task.NodeType)
+	}
+
+	_, err = store.CompleteTask(CompleteTaskInput{
+		TaskID:   task.TaskID,
+		WorkerID: "worker-1",
+		Success:  true,
+		Summary:  "try to expand",
+		ExpansionPayload: &ExpansionPayload{
+			Reasoning: "invalid expansion",
+			NewNodes: []ExpansionNode{
+				{
+					NodeID:       "dyn_1",
+					SkillName:    "QueryLog",
+					Dependencies: []string{task.TaskID},
+				},
+			},
+			DownstreamWiring: DownstreamWiring{
+				RedirectFrom: task.TaskID,
+				RedirectTo:   []string{"dyn_1"},
+			},
+		},
+	})
+	if err != ErrExpansionNotAllowed {
+		t.Fatalf("expected ErrExpansionNotAllowed, got=%v", err)
+	}
+
+	final, err := store.GetSessionSnapshot(snapshot.Session.SessionID)
+	if err != nil {
+		t.Fatalf("snapshot failed: %v", err)
+	}
+	if len(final.Tasks) != 3 {
+		t.Fatalf("unexpected task count after rejected expansion: %d", len(final.Tasks))
+	}
+}
+
 func TestCreateSessionFromPlanBuildsRuntimeGraph(t *testing.T) {
 	store := NewStore()
 	snapshot, err := store.CreateSessionFromPlan("u-plan", "plan-based creation", []SessionTaskSpec{
-		{RefID: "query", SkillName: "QueryLog"},
-		{RefID: "sum", SkillName: "LLMSummarize", Dependencies: []string{"query"}},
-		{RefID: "mail", SkillName: "SendEmail", Dependencies: []string{"sum"}},
+		{RefID: "query", NodeType: model.NodeTypeSkillSink, SkillName: "QueryLog"},
+		{RefID: "sum", NodeType: model.NodeTypeSkillSink, SkillName: "LLMSummarize", Dependencies: []string{"query"}},
+		{RefID: "mail", NodeType: model.NodeTypeSkillSink, SkillName: "SendEmail", Dependencies: []string{"sum"}},
 	})
 	if err != nil {
 		t.Fatalf("create session from plan failed: %v", err)

@@ -2,8 +2,11 @@ package planner
 
 import "fmt"
 
+import "aurora/apps/arqo/internal/model"
+
 type Node struct {
 	NodeID       string
+	NodeType     model.NodeType
 	SkillName    string
 	Parameters   map[string]any
 	Dependencies []string
@@ -14,7 +17,10 @@ type ValidationErrorCode string
 const (
 	ValidationErrDuplicateNode    ValidationErrorCode = "DUPLICATE_NODE"
 	ValidationErrMissingNodeID    ValidationErrorCode = "MISSING_NODE_ID"
+	ValidationErrMissingNodeType  ValidationErrorCode = "MISSING_NODE_TYPE"
+	ValidationErrInvalidNodeType  ValidationErrorCode = "INVALID_NODE_TYPE"
 	ValidationErrMissingSkillName ValidationErrorCode = "MISSING_SKILL_NAME"
+	ValidationErrInvalidNodeSkill ValidationErrorCode = "INVALID_NODE_SKILL"
 	ValidationErrDanglingDep      ValidationErrorCode = "DANGLING_DEPENDENCY"
 	ValidationErrSelfDependency   ValidationErrorCode = "SELF_DEPENDENCY"
 	ValidationErrCyclicDependency ValidationErrorCode = "CYCLIC_DEPENDENCY"
@@ -60,12 +66,52 @@ func ValidateDAG(nodes []Node) ValidationResult {
 			})
 			continue
 		}
-		if node.SkillName == "" {
+		if node.NodeType == "" {
 			result.Valid = false
 			result.Errors = append(result.Errors, ValidationError{
-				Code:   ValidationErrMissingSkillName,
+				Code:   ValidationErrMissingNodeType,
 				NodeID: node.NodeID,
-				Detail: "skill_name is required",
+				Detail: "node_type is required",
+			})
+			continue
+		}
+		parsedNodeType, err := model.ParseNodeType(string(node.NodeType))
+		if err != nil {
+			result.Valid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Code:   ValidationErrInvalidNodeType,
+				NodeID: node.NodeID,
+				Detail: fmt.Sprintf("node_type %q is not supported", node.NodeType),
+			})
+			continue
+		}
+		node.NodeType = parsedNodeType
+		if node.NodeType == model.NodeTypeSkillSink {
+			if node.SkillName == "" {
+				result.Valid = false
+				result.Errors = append(result.Errors, ValidationError{
+					Code:   ValidationErrMissingSkillName,
+					NodeID: node.NodeID,
+					Detail: "skill_name is required for skill sink node",
+				})
+				continue
+			}
+		}
+		if node.NodeType == model.NodeTypeExpandPlanning && node.SkillName != "" && node.SkillName != "ReActPlanner" {
+			result.Valid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Code:   ValidationErrInvalidNodeSkill,
+				NodeID: node.NodeID,
+				Detail: "expanding node must use ReActPlanner skill when skill_name is provided",
+			})
+			continue
+		}
+		if node.NodeType == model.NodeTypeSkillSink && node.SkillName == "ReActPlanner" {
+			result.Valid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Code:   ValidationErrInvalidNodeSkill,
+				NodeID: node.NodeID,
+				Detail: "ReActPlanner must be declared as EXPAND_PLANNING node",
 			})
 			continue
 		}
