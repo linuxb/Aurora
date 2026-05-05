@@ -1,11 +1,10 @@
 # Aurora Agentic System
 
 ## Project Structure
-doc
-|- design 设计文档，你可以通过它们了解系统的设计思路，系统架构以及开发Spec。
-|- progress 开发进度记录，研发时可以回顾之前开发内容。
-|- dev 开发调试指引
-
+doc/design 设计文档，你可以通过它们了解系统的设计思路，系统架构以及开发Spec。</br>
+doc/progress 开发进度记录，研发时可以回顾之前开发内容。</br>
+doc/dev 开发调试指引，包括一些测试工具的使用。</br>
+具体工程目录以及功能说明参考 README.md </br>
 生成文档时需要按照类别写入特定目录。
 
 ## Plan
