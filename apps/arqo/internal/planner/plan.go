@@ -1,0 +1,21 @@
+package planner
+
+import (
+	"fmt"
+	"time"
+)
+
+type Plan struct {
+	PlanID   string              `json:"plan_id"`
+	Source   string              `json:"source"`
+	Nodes    []Node              `json:"nodes"`
+	Warnings []ValidationWarning `json:"warnings,omitempty"`
+}
+
+func NewPlan(source string, nodes []Node) Plan {
+	return Plan{
+		PlanID: fmt.Sprintf("plan_%d", time.Now().UTC().UnixNano()),
+		Source: source,
+		Nodes:  nodes,
+	}
+}

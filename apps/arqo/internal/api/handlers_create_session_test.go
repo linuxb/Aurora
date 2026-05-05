@@ -28,6 +28,13 @@ func TestCreateSessionRejectsInvalidPlan(t *testing.T) {
 	if got, want := res.Code, http.StatusUnprocessableEntity; got != want {
 		t.Fatalf("unexpected status code: got=%d want=%d body=%s", got, want, res.Body.String())
 	}
+	var payload map[string]any
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	if _, ok := payload["plan"]; !ok {
+		t.Fatalf("expected plan field in invalid response, got=%v", payload)
+	}
 }
 
 func TestCreateSessionAcceptsValidPlan(t *testing.T) {
@@ -46,5 +53,12 @@ func TestCreateSessionAcceptsValidPlan(t *testing.T) {
 	mux.ServeHTTP(res, req)
 	if got, want := res.Code, http.StatusCreated; got != want {
 		t.Fatalf("unexpected status code: got=%d want=%d body=%s", got, want, res.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	if _, ok := payload["plan"]; !ok {
+		t.Fatalf("expected plan field in created response, got=%v", payload)
 	}
 }

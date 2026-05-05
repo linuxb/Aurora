@@ -24,11 +24,14 @@
   - `apps/arqo/internal/planner/factory.go`
   - wired in `apps/arqo/main.go`
   - factory tests added
+- Upgraded planner output to a structured plan contract:
+  - `planner.Plan` now includes `plan_id`, `source`, `nodes`, `warnings`
+  - `POST /v1/sessions` returns `plan` in both success and invalid-plan responses
 
 ## Verification
 - `go test ./...` in `apps/arqo` passes with validator tests included.
 
 ## Pending in Phase 2
-- Wire validator into session planning flow before DAG persistence.
-- Define intent-router request/response contract and fallback strategy (`mock`/`model`).
-- Add API-level validation error response schema for invalid DAG plans.
+- Define model-backed planner contract and fallback behavior (`mock` -> `model` failover policy).
+- Add plan-to-scheduler mapping layer to support non-demo DAG creation from planner output.
+- Extend API/schema tests for plan metadata compatibility and versioning.

@@ -51,6 +51,11 @@ type createSessionRequest struct {
 	PlanningMode string `json:"planning_mode"`
 }
 
+type createSessionResponse struct {
+	scheduler.Snapshot
+	Plan planner.Plan `json:"plan"`
+}
+
 func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 	var req createSessionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -62,12 +67,14 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	planNodes := s.planner.Plan(req.Intent, req.PlanningMode)
-	validation := planner.ValidateDAG(planNodes)
+	plan := s.planner.Plan(req.Intent, req.PlanningMode)
+	validation := planner.ValidateDAG(plan.Nodes)
+	plan.Warnings = validation.Warnings
 	if !validation.Valid {
 		respondJSON(w, http.StatusUnprocessableEntity, map[string]any{
 			"code":     "invalid_dag_plan",
 			"message":  "planner produced an invalid DAG plan",
+			"plan":     plan,
 			"errors":   validation.Errors,
 			"warnings": validation.Warnings,
 		})
@@ -92,7 +99,10 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 		Source:    "arqo",
 		At:        time.Now().UTC(),
 	})
-	respondJSON(w, http.StatusCreated, snapshot)
+	respondJSON(w, http.StatusCreated, createSessionResponse{
+		Snapshot: snapshot,
+		Plan:     plan,
+	})
 }
 
 func (s *Server) getSession(w http.ResponseWriter, r *http.Request) {
