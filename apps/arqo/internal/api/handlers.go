@@ -10,16 +10,25 @@ import (
 	"time"
 
 	"aurora/apps/arqo/internal/events"
+	"aurora/apps/arqo/internal/planner"
 	"aurora/apps/arqo/internal/scheduler"
 )
 
 type Server struct {
-	store  scheduler.Engine
-	broker events.Broker
+	store   scheduler.Engine
+	broker  events.Broker
+	planner planner.Router
 }
 
 func NewServer(store scheduler.Engine, broker events.Broker) *Server {
-	return &Server{store: store, broker: broker}
+	return &Server{store: store, broker: broker, planner: planner.NewMockRouter()}
+}
+
+func NewServerWithPlanner(store scheduler.Engine, broker events.Broker, dagPlanner planner.Router) *Server {
+	if dagPlanner == nil {
+		dagPlanner = planner.NewMockRouter()
+	}
+	return &Server{store: store, broker: broker, planner: dagPlanner}
 }
 
 func (s *Server) Register(mux *http.ServeMux) {
@@ -50,6 +59,18 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSpace(req.UserID) == "" || strings.TrimSpace(req.Intent) == "" {
 		respondError(w, http.StatusBadRequest, "invalid_argument", "user_id and intent are required")
+		return
+	}
+
+	planNodes := s.planner.Plan(req.Intent, req.PlanningMode)
+	validation := planner.ValidateDAG(planNodes)
+	if !validation.Valid {
+		respondJSON(w, http.StatusUnprocessableEntity, map[string]any{
+			"code":     "invalid_dag_plan",
+			"message":  "planner produced an invalid DAG plan",
+			"errors":   validation.Errors,
+			"warnings": validation.Warnings,
+		})
 		return
 	}
 

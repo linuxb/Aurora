@@ -13,6 +13,13 @@
   - dangling dependency detection
   - isolated node warning
 - Added unit tests: `apps/arqo/internal/planner/validator_test.go`.
+- Added mock intent-router planner: `apps/arqo/internal/planner/router.go`.
+- Wired planner + validator into `POST /v1/sessions`:
+  - validate DAG plan before session creation
+  - return `422 invalid_dag_plan` when plan is invalid
+- Added API tests for create-session validation path:
+  - invalid plan rejected
+  - valid plan accepted
 
 ## Verification
 - `go test ./...` in `apps/arqo` passes with validator tests included.
