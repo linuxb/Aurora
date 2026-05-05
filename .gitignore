@@ -13,3 +13,7 @@ apps/polaris/target/
 
 # IDE
 .vscode/*.log
+
+# Ruby
+.bundle/
+Gemfile.lock

@@ -1,7 +1,7 @@
 SHELL := /bin/zsh
 GOCACHE ?= $(CURDIR)/.cache/go-build
 
-.PHONY: help run-arqo run-worker run-polaris test-arqo test-polaris test check-env infra-up infra-down infra-up-dev infra-down-dev infra-up-full infra-down-full
+.PHONY: help run-arqo run-worker run-polaris test-arqo test-polaris test check-env infra-up infra-down infra-up-dev infra-down-dev infra-up-full infra-down-full test-smoke-ruby test-fault-ruby
 
 help:
 	@echo "Targets:"
@@ -14,6 +14,8 @@ help:
 	@echo "  infra-down    - stop dev infra dependencies"
 	@echo "  infra-up-full - start full stack from docker-compose.yml"
 	@echo "  infra-down-full - stop full stack from docker-compose.yml"
+	@echo "  test-smoke-ruby - run Ruby smoke E2E for arqo session DAG"
+	@echo "  test-fault-ruby - run Ruby fault-injection checks"
 
 run-arqo:
 	mkdir -p $(GOCACHE)
@@ -58,3 +60,9 @@ infra-up-full:
 
 infra-down-full:
 	docker compose -f docker-compose.yml down
+
+test-smoke-ruby:
+	ruby tools/testing/arqo_smoke.rb
+
+test-fault-ruby:
+	ruby tools/testing/arqo_fault_injector.rb

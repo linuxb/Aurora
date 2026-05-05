@@ -59,6 +59,12 @@ make infra-down-full
 make test
 ```
 
+System smoke/fault toolkit:
+```bash
+make test-smoke-ruby
+make test-fault-ruby
+```
+
 ## Engineering Notes
 
 - The current scheduler store is in-memory for fast local iteration.
@@ -72,3 +78,4 @@ Phase 0 progress: `doc/progress/Phase-0-Progress.md`.
 Phase 1 progress: `doc/progress/Phase-1-Progress.md`.
 Local MySQL setup: `doc/dev/Local-MySQL-Setup.md`.
 Local dev debug setup: `doc/dev/Local-Dev-Debug-Setup.md`.
+System testing toolkit: `doc/dev/System-Testing-Toolkit.md`.
