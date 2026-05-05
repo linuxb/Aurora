@@ -637,6 +637,9 @@ CREATE TABLE IF NOT EXISTS task_raw_data (
 	if _, err := s.db.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS node_type VARCHAR(32) NOT NULL DEFAULT 'SKILL_SINK'`); err != nil {
 		return fmt.Errorf("ensure node_type column failed: %w", err)
 	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE tasks SET node_type='EXPAND_PLANNING' WHERE node_type='EXPANDING'`); err != nil {
+		return fmt.Errorf("normalize node_type values failed: %w", err)
+	}
 	return nil
 }
 

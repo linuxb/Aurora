@@ -36,7 +36,7 @@ func ParseNodeType(raw string) (NodeType, error) {
 	switch normalized {
 	case string(NodeTypeSkillSink):
 		return NodeTypeSkillSink, nil
-	case string(NodeTypeExpandPlanning), "EXPANDING":
+	case string(NodeTypeExpandPlanning):
 		return NodeTypeExpandPlanning, nil
 	default:
 		return "", fmt.Errorf("invalid node_type %q", raw)
