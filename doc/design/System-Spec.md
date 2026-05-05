@@ -87,6 +87,8 @@ WHERE status \= 'RUNNING' AND expire\_at \< NOW();
       "items": {  
         "node\_id": { "type": "string" },  
         "skill\_name": { "type": "string" },  
+        // skill_sink/expand_planning
+        "node_type": { "type": "string" },
         "dependencies": { "type": "array", "items": { "type": "string" } }  
       }  
     },  

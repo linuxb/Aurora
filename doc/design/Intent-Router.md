@@ -10,6 +10,8 @@
 2. **Step 2: DAG 骨架生成 (Restricted Generation)**：基于提取的特征，结合预设的 Skill Schema，再次利用大模型进行受限解码，生成初步的 DAG JSON。  
 3. **Step 3: 编译器级静态校验 (DAG Validator)**：使用纯代码逻辑对生成的 JSON 进行严苛的图论检查，确保 100% 物理合法。
 
+DAG中的每个node（或者我们称呼他们为Step）可以直接映射为具体的Skill，也可以为需要JIT动态扩图的Expanding Step，对于后者，其实对应调用LLM的内部predefined skill调用LLM进一步拆解任务。
+
 ## **2\. 模块一：基于 Llama 轻量模型的意图与实体插槽提取**
 
 ### **2.1 核心挑战**
@@ -74,6 +76,12 @@
 
 为了保证 LLM 吐出的数据能够被 Go 的 json.Unmarshal 完美解析，必须施加极其严密的受限解码约束。
 
+**Schame规约**
+
+DAG生成两种类型Node，分别为Skill Sink Node以及Expanding Planning Node
+- Skill Sink Node 经过LLM判断确定可以映射为具体已注册Skill的Node，不会再进行Expand Plan的LLM调用。
+- Expanding Planning Node 不能直接映射为Skill的Node，需要进行JIT的Expanding，会继续生成子DAG。
+
 ```json
 // DAG 生成的 JSON Schema 强约束  
 {  
@@ -86,24 +94,161 @@
         "type": "object",  
         "properties": {  
           "node\_id": { "type": "string", "pattern": "^\[a-zA-Z0-9\_\]+$" },  
-          "skill\_name": {   
+          "skill\_name": {
              "type": "string",   
              // 这里可以动态注入当前系统已注册的所有合法 Skill 名称  
              "enum": \["QueryLog", "LLMSummarize", "SendEmail", "SearchGraph"\]   
-          },  
+          },
+          // skill_sink/expand_planning
+          "node_type": "skill_sink",
           "dependencies": {  
             "type": "array",  
             "items": { "type": "string" }  
           },  
           "input\_parameters": { "type": "object" }  
         },  
-        "required": \["node\_id", "skill\_name", "dependencies"\]  
+        "required": \["node\_id", "node\_type", "dependencies"\]  
       }  
     }  
   },  
   "required": \["dag\_id", "nodes"\]  
 }
 ```
+
+**DAG构建过程**
+
+```Golang
+package arqo
+
+import "context"
+
+// ==================== 1. 核心数据结构定义 ====================
+
+// NodeType 定义节点的两种根本属性
+type NodeType string
+
+const (
+	NodeTypeSkillSink     NodeType = "SKILL_SINK"      // 具体的干活节点，直接映射已知 Skill
+	NodeTypeExpandPlanner NodeType = "EXPAND_PLANNING" // 规划节点，无法直接映射，需进一步拆分
+)
+
+// Node 代表 DAG 中的一个执行单元
+type Node struct {
+	ID           string
+	DAGID        string
+	Type         NodeType
+	SkillName    string                 // 仅 Type == NodeTypeSkillSink 时有效
+	Goal         string                 // 仅 Type == NodeTypeExpandPlanner 时有效，指示该节点要达成的目标
+	Parameters   map[string]interface{}
+	Dependencies []string
+}
+
+// IntentContext 来自 Intent Router 的意图上下文
+type IntentContext struct {
+	MacroIntent string
+	IntentScore float64
+	Slots       map[string]interface{}
+}
+
+// ==================== 2. Orchestrator: 初始 DAG 生成 ====================
+
+type Orchestrator struct {
+	LLMClient *LLMProxy
+	Registry  *SkillRegistry // 全局 Skill 注册表
+}
+
+// GenerateInitialDAG 根据意图路由的结果，生成初始静态主干 DAG
+func (o *Orchestrator) GenerateInitialDAG(ctx context.Context, intent IntentContext) ([]*Node, error) {
+	// 获取当前系统所有合法的 Skill Schema，用于供 LLM 参考
+	availableSkills := o.Registry.GetAvailableSkillSchemas()
+
+	// 构造 Prompt：要求 LLM 优先映射 Skill Sink，无法映射的输出为 Expand Planning
+	prompt := buildOrchestratorPrompt(intent, availableSkills)
+
+	// 使用受限解码强制 LLM 输出 DAG 结构的 JSON
+	dagJSON := o.LLMClient.GenerateStructured(ctx, prompt, DAGSchema)
+
+	// 解析并返回初始节点列表 (随后存入 TiDB)
+	return parseToNodes(dagJSON), nil
+}
+
+// ==================== 3. Arqo Dispatcher: 节点执行与 JIT 扩图 ====================
+
+type Dispatcher struct {
+	LLMClient *LLMProxy
+	Registry  *SkillRegistry
+	DB        *TiDBClient // 操作 TiDB 进行事务扩图
+}
+
+// ExecuteNode 当某个节点前置依赖归零，变成 READY 态时，Arqo 调度执行该节点
+func (d *Dispatcher) ExecuteNode(ctx context.Context, node *Node, memoryCtx MemoryContext) error {
+	
+	// 运行时二次研判 (Runtime Resolution)：
+	// 如果它是 Expand Planning Node，判断系统当前是否已经有刚好能覆盖其 Goal 的新 Skill
+	if node.Type == NodeTypeExpandPlanner {
+		if matchedSkill := d.Registry.FindExactMatch(node.Goal); matchedSkill != "" {
+			// 动态降级：直接变异为 Skill Sink Node，免去一次昂贵的 LLM 拆分调用
+			node.Type = NodeTypeSkillSink
+			node.SkillName = matchedSkill
+		}
+	}
+
+	// 核心状态机路由
+	switch node.Type {
+	case NodeTypeSkillSink:
+		// 叶子节点：直接路由给底层的 TS Worker 集群执行
+		return d.dispatchToTSWorker(node, memoryCtx)
+
+	case NodeTypeExpandPlanner:
+		// 扩展节点：无法直接执行，必须调用 LLM 进行子图拆分 (JIT Expanding)
+		return d.expandSubDAG(ctx, node, memoryCtx)
+	}
+
+	return nil
+}
+
+// expandSubDAG 执行子 DAG 的拆分与热插拔
+func (d *Dispatcher) expandSubDAG(ctx context.Context, plannerNode *Node, memoryCtx MemoryContext) error {
+	availableSkills := d.Registry.GetAvailableSkillSchemas()
+
+	// 组装 ReAct 扩图 Prompt，传入当前节点的 Goal 和系统已积攒的 Memory 上下文
+	prompt := buildExpandPrompt(plannerNode.Goal, memoryCtx, availableSkills)
+
+	// 调用 LLM 生成新的子节点组
+	subDAGJSON := d.LLMClient.GenerateStructured(ctx, prompt, SubDAGSchema)
+	newNodes := parseToNodes(subDAGJSON)
+
+	// 开启 TiDB 分布式事务，进行热插拔操作 (Hot-Plugging)
+	tx := d.DB.BeginTx()
+	defer tx.Rollback()
+
+	// 1. 将新生成的子节点插入数据库，初始状态设为 PENDING
+	for _, n := range newNodes {
+		tx.InsertNode(plannerNode.DAGID, n)
+	}
+
+	// 2. 依赖重定向 (Downstream Wiring)
+	// 将原本依赖 plannerNode 的下游节点，其依赖指针改绑到 newNodes 的尾部节点上
+	tailNodes := findTailNodes(newNodes)
+	tx.RedirectDependencies(plannerNode.ID, tailNodes)
+
+	// 3. 将当前的 Planner 节点状态标记为 SUCCESS
+	// 它没有执行具体的物理动作，它的使命就是“繁衍”出具体的子执行路径
+	tx.MarkNodeSuccess(plannerNode.ID)
+
+	// 4. 提交事务
+	// 事务提交后，如果 newNodes 中有节点没有前置依赖，
+	// TiDB 会触发其变为 READY，Arqo 的抢占协程会瞬间接管执行。
+	return tx.Commit()
+}
+```
+
+- 在生成DAG的过程中，Intent Slot的信息应该作为长期Context被读取。
+- 调用LLM，也是一个predefined skill，内置在系统中。
+- 如果一个Node多次扩展DAG均无法映射确定的Skill，为避免子图无限递归，我们需要把这种情况返回UI层（通过抛出异常），提示用户需要新的Skill，或无法进行具体的xx操作。
+
+**NOTES**
+- skill_name在非skill_sink node中可以为空。
 
 ### **3.3 动态 RAG 提示词注入 (Few-Shot 增强)**
 

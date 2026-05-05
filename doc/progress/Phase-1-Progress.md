@@ -82,6 +82,23 @@
 - Add concurrency tests for duplicate lease prevention with persistent storage.
 - Run real TiDB integration verification and collect SQL compatibility checklist.
 
+## Priority Assessment (2026-05-05T11:20:00+08:00)
+- Persistent-store concurrency tests:
+  - Importance: `high` (quality/risk control)
+  - Blocking for next phase: `no` (mainline architecture and feature flow are already runnable)
+  - Risk if deferred: hidden race conditions may surface under high concurrency load
+- Real TiDB integration verification:
+  - Importance: `medium-high` (backend compatibility confidence)
+  - Blocking for next phase: `no` (MySQL path already validated; TiDB can follow as compatibility track)
+  - Risk if deferred: TiDB-specific SQL/runtime behavior may fail late in pre-release
+
+## Phase 1 Exit Decision (2026-05-05T11:20:00+08:00)
+- Decision: do not block overall roadmap on remaining optimization items.
+- Rationale: current `arqo + worker-ts` mainline is functional, testable, and already supports JIT expansion semantics in both memory and MySQL/TiDB SQL paths.
+- Action:
+  - Keep the two pending items as a dedicated hardening track.
+  - Continue core feature delivery in the next phase, with periodic regression checks.
+
 ## New Decision Points for Phase 1
 1. `2026-04-18T18:40:00+08:00` | Should we keep SSE event payload versioned (`schema_version`) from this phase?
 2. `2026-04-18T18:40:00+08:00` | Should telemetry ingestion be best-effort (current) or strict-fail when broker/publish fails?
