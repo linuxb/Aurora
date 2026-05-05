@@ -11,6 +11,7 @@ import (
 
 	"aurora/apps/arqo/internal/api"
 	"aurora/apps/arqo/internal/events"
+	"aurora/apps/arqo/internal/planner"
 	"aurora/apps/arqo/internal/scheduler"
 )
 
@@ -40,7 +41,13 @@ func main() {
 	}()
 
 	log.Printf("event backend initialized: %s", backend)
-	server := api.NewServer(engine, broker)
+	router, plannerBackend, err := planner.NewRouterFromEnv()
+	if err != nil {
+		log.Fatalf("failed to init planner backend: %v", err)
+	}
+	log.Printf("planner backend initialized: %s", plannerBackend)
+
+	server := api.NewServerWithPlanner(engine, broker, router)
 	mux := http.NewServeMux()
 	server.Register(mux)
 

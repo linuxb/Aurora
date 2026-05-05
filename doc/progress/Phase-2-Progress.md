@@ -20,6 +20,10 @@
 - Added API tests for create-session validation path:
   - invalid plan rejected
   - valid plan accepted
+- Added planner backend factory (`ARQO_PLANNER_BACKEND`, default `mock`):
+  - `apps/arqo/internal/planner/factory.go`
+  - wired in `apps/arqo/main.go`
+  - factory tests added
 
 ## Verification
 - `go test ./...` in `apps/arqo` passes with validator tests included.
