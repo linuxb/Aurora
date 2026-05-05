@@ -4,6 +4,8 @@ import "fmt"
 
 type Node struct {
 	NodeID       string
+	SkillName    string
+	Parameters   map[string]any
 	Dependencies []string
 }
 
@@ -12,6 +14,7 @@ type ValidationErrorCode string
 const (
 	ValidationErrDuplicateNode    ValidationErrorCode = "DUPLICATE_NODE"
 	ValidationErrMissingNodeID    ValidationErrorCode = "MISSING_NODE_ID"
+	ValidationErrMissingSkillName ValidationErrorCode = "MISSING_SKILL_NAME"
 	ValidationErrDanglingDep      ValidationErrorCode = "DANGLING_DEPENDENCY"
 	ValidationErrSelfDependency   ValidationErrorCode = "SELF_DEPENDENCY"
 	ValidationErrCyclicDependency ValidationErrorCode = "CYCLIC_DEPENDENCY"
@@ -54,6 +57,15 @@ func ValidateDAG(nodes []Node) ValidationResult {
 			result.Errors = append(result.Errors, ValidationError{
 				Code:   ValidationErrMissingNodeID,
 				Detail: "node_id is required",
+			})
+			continue
+		}
+		if node.SkillName == "" {
+			result.Valid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Code:   ValidationErrMissingSkillName,
+				NodeID: node.NodeID,
+				Detail: "skill_name is required",
 			})
 			continue
 		}

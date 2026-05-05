@@ -9,6 +9,7 @@ import (
 type Engine interface {
 	CreateDemoSession(userID, intent string) (Snapshot, error)
 	CreateJITDemoSession(userID, intent string) (Snapshot, error)
+	CreateSessionFromPlan(userID, intent string, tasks []SessionTaskSpec) (Snapshot, error)
 	PullReadyTask(workerID string, ttl time.Duration) (*model.Task, error)
 	CompleteTask(input CompleteTaskInput) (*model.Task, error)
 	ExpireRunningTasks(now time.Time) []string

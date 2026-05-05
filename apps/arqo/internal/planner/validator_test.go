@@ -4,9 +4,9 @@ import "testing"
 
 func TestValidateDAG_Valid(t *testing.T) {
 	result := ValidateDAG([]Node{
-		{NodeID: "a"},
-		{NodeID: "b", Dependencies: []string{"a"}},
-		{NodeID: "c", Dependencies: []string{"b"}},
+		{NodeID: "a", SkillName: "QueryLog"},
+		{NodeID: "b", SkillName: "LLMSummarize", Dependencies: []string{"a"}},
+		{NodeID: "c", SkillName: "SendEmail", Dependencies: []string{"b"}},
 	})
 	if !result.Valid {
 		t.Fatalf("expected valid DAG, got errors=%v", result.Errors)
@@ -18,7 +18,7 @@ func TestValidateDAG_Valid(t *testing.T) {
 
 func TestValidateDAG_DanglingDependency(t *testing.T) {
 	result := ValidateDAG([]Node{
-		{NodeID: "a", Dependencies: []string{"missing"}},
+		{NodeID: "a", SkillName: "QueryLog", Dependencies: []string{"missing"}},
 	})
 	if result.Valid {
 		t.Fatal("expected invalid result")
@@ -30,9 +30,9 @@ func TestValidateDAG_DanglingDependency(t *testing.T) {
 
 func TestValidateDAG_Cycle(t *testing.T) {
 	result := ValidateDAG([]Node{
-		{NodeID: "a", Dependencies: []string{"c"}},
-		{NodeID: "b", Dependencies: []string{"a"}},
-		{NodeID: "c", Dependencies: []string{"b"}},
+		{NodeID: "a", SkillName: "A", Dependencies: []string{"c"}},
+		{NodeID: "b", SkillName: "B", Dependencies: []string{"a"}},
+		{NodeID: "c", SkillName: "C", Dependencies: []string{"b"}},
 	})
 	if result.Valid {
 		t.Fatal("expected invalid result for cycle")
@@ -50,9 +50,9 @@ func TestValidateDAG_Cycle(t *testing.T) {
 
 func TestValidateDAG_IsolatedNodeWarning(t *testing.T) {
 	result := ValidateDAG([]Node{
-		{NodeID: "a"},
-		{NodeID: "b", Dependencies: []string{"a"}},
-		{NodeID: "isolated"},
+		{NodeID: "a", SkillName: "QueryLog"},
+		{NodeID: "b", SkillName: "LLMSummarize", Dependencies: []string{"a"}},
+		{NodeID: "isolated", SkillName: "SendEmail"},
 	})
 	if !result.Valid {
 		t.Fatalf("expected valid result, got errors=%v", result.Errors)
@@ -65,5 +65,17 @@ func TestValidateDAG_IsolatedNodeWarning(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected isolated warning, got=%v", result.Warnings)
+	}
+}
+
+func TestValidateDAG_MissingSkillName(t *testing.T) {
+	result := ValidateDAG([]Node{
+		{NodeID: "a"},
+	})
+	if result.Valid {
+		t.Fatal("expected invalid result")
+	}
+	if len(result.Errors) == 0 || result.Errors[0].Code != ValidationErrMissingSkillName {
+		t.Fatalf("expected missing skill_name error, got=%v", result.Errors)
 	}
 }

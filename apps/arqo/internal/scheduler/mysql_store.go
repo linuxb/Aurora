@@ -215,6 +215,97 @@ func (s *MySQLStore) CreateJITDemoSession(userID, intent string) (Snapshot, erro
 	return s.GetSessionSnapshot(sessionID)
 }
 
+func (s *MySQLStore) CreateSessionFromPlan(userID, intent string, tasks []SessionTaskSpec) (Snapshot, error) {
+	sessionID, err := newPrefixedID("sess")
+	if err != nil {
+		return Snapshot{}, err
+	}
+	dagID, err := newPrefixedID("dag")
+	if err != nil {
+		return Snapshot{}, err
+	}
+	now := time.Now().UTC()
+
+	type runtimeTask struct {
+		taskID     string
+		spec       SessionTaskSpec
+		deps       []string
+		children   []string
+		pending    int
+		taskStatus string
+	}
+
+	refToTaskID := make(map[string]string, len(tasks))
+	for _, spec := range tasks {
+		id, idErr := newPrefixedID("task")
+		if idErr != nil {
+			return Snapshot{}, idErr
+		}
+		refToTaskID[spec.RefID] = id
+	}
+
+	childRefs := make(map[string][]string, len(tasks))
+	for _, spec := range tasks {
+		for _, depRef := range spec.Dependencies {
+			childRefs[depRef] = append(childRefs[depRef], spec.RefID)
+		}
+	}
+
+	runtimeTasks := make([]runtimeTask, 0, len(tasks))
+	for _, spec := range tasks {
+		deps := make([]string, 0, len(spec.Dependencies))
+		for _, depRef := range spec.Dependencies {
+			deps = append(deps, refToTaskID[depRef])
+		}
+		children := make([]string, 0, len(childRefs[spec.RefID]))
+		for _, childRef := range childRefs[spec.RefID] {
+			children = append(children, refToTaskID[childRef])
+		}
+		status := "PENDING"
+		if len(deps) == 0 {
+			status = "READY"
+		}
+		runtimeTasks = append(runtimeTasks, runtimeTask{
+			taskID:     refToTaskID[spec.RefID],
+			spec:       spec,
+			deps:       deps,
+			children:   children,
+			pending:    len(deps),
+			taskStatus: status,
+		})
+	}
+
+	tx, err := s.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	_, err = tx.Exec(
+		`INSERT INTO sessions (session_id, dag_id, user_id, intent, created_at) VALUES (?, ?, ?, ?, ?)`,
+		sessionID, dagID, userID, intent, now,
+	)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	_, err = tx.Exec(
+		`INSERT INTO dags (dag_id, session_id, user_id, original_intent, status, replan_count, current_depth, max_depth, created_at) VALUES (?, ?, ?, ?, 'RUNNING', 0, 1, 10, ?)`,
+		dagID, sessionID, userID, intent, now,
+	)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	for _, rt := range runtimeTasks {
+		if err := s.insertTask(tx, rt.taskID, dagID, rt.spec.SkillName, rt.taskStatus, rt.pending, rt.deps, rt.children, rt.spec.Parameters, now); err != nil {
+			return Snapshot{}, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return Snapshot{}, err
+	}
+	return s.GetSessionSnapshot(sessionID)
+}
+
 func (s *MySQLStore) PullReadyTask(workerID string, ttl time.Duration) (*model.Task, error) {
 	tx, err := s.db.BeginTx(context.Background(), nil)
 	if err != nil {

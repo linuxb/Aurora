@@ -27,6 +27,11 @@
 - Upgraded planner output to a structured plan contract:
   - `planner.Plan` now includes `plan_id`, `source`, `nodes`, `warnings`
   - `POST /v1/sessions` returns `plan` in both success and invalid-plan responses
+- Added plan-to-scheduler runtime graph mapping:
+  - new scheduler API `CreateSessionFromPlan`
+  - memory + MySQL/TiDB backends now build tasks from planner nodes
+  - planner node `ref_id` is mapped to unique runtime `task_id` per session
+  - `POST /v1/sessions` now creates sessions from planner output instead of fixed demo graph
 
 ## Verification
 - `go test ./...` in `apps/arqo` passes with validator tests included.

@@ -56,6 +56,19 @@ type createSessionResponse struct {
 	Plan planner.Plan `json:"plan"`
 }
 
+func toSessionTaskSpecs(nodes []planner.Node) []scheduler.SessionTaskSpec {
+	specs := make([]scheduler.SessionTaskSpec, 0, len(nodes))
+	for _, node := range nodes {
+		specs = append(specs, scheduler.SessionTaskSpec{
+			RefID:        node.NodeID,
+			SkillName:    node.SkillName,
+			Parameters:   node.Parameters,
+			Dependencies: node.Dependencies,
+		})
+	}
+	return specs
+}
+
 func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 	var req createSessionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -83,11 +96,7 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 
 	var snapshot scheduler.Snapshot
 	var err error
-	if strings.EqualFold(strings.TrimSpace(req.PlanningMode), "jit") {
-		snapshot, err = s.store.CreateJITDemoSession(req.UserID, req.Intent)
-	} else {
-		snapshot, err = s.store.CreateDemoSession(req.UserID, req.Intent)
-	}
+	snapshot, err = s.store.CreateSessionFromPlan(req.UserID, req.Intent, toSessionTaskSpecs(plan.Nodes))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "create_session_failed", err.Error())
 		return

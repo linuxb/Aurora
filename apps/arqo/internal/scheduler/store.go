@@ -184,6 +184,80 @@ func (s *Store) CreateJITDemoSession(userID, intent string) (Snapshot, error) {
 	return s.snapshotLocked(sessionID), nil
 }
 
+func (s *Store) CreateSessionFromPlan(userID, intent string, tasks []SessionTaskSpec) (Snapshot, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	sessionID := fmt.Sprintf("sess_%06d", s.sessionCounter.Add(1))
+	dagID := fmt.Sprintf("dag_%06d", s.dagCounter.Add(1))
+	now := time.Now().UTC()
+
+	session := model.Session{
+		SessionID: sessionID,
+		DAGID:     dagID,
+		UserID:    userID,
+		Intent:    intent,
+		CreatedAt: now,
+	}
+	dag := model.DAG{
+		DAGID:          dagID,
+		SessionID:      sessionID,
+		UserID:         userID,
+		OriginalIntent: intent,
+		Status:         model.DAGStatusRunning,
+		CurrentDepth:   1,
+		MaxDepth:       10,
+		CreatedAt:      now,
+	}
+
+	refToTaskID := make(map[string]string, len(tasks))
+	for _, spec := range tasks {
+		refToTaskID[spec.RefID] = fmt.Sprintf("task_%06d", s.taskCounter.Add(1))
+	}
+
+	resolvedChildren := make(map[string][]string, len(tasks))
+	for _, spec := range tasks {
+		for _, depRef := range spec.Dependencies {
+			resolvedChildren[depRef] = append(resolvedChildren[depRef], spec.RefID)
+		}
+	}
+
+	s.sessions[sessionID] = session
+	s.dags[dagID] = dag
+	s.rawDataByDAG[dagID] = make(map[string]any)
+	s.tasksByDAG[dagID] = make([]string, 0, len(tasks))
+
+	for _, spec := range tasks {
+		taskID := refToTaskID[spec.RefID]
+		deps := make([]string, 0, len(spec.Dependencies))
+		for _, depRef := range spec.Dependencies {
+			deps = append(deps, refToTaskID[depRef])
+		}
+		children := make([]string, 0, len(resolvedChildren[spec.RefID]))
+		for _, childRef := range resolvedChildren[spec.RefID] {
+			children = append(children, refToTaskID[childRef])
+		}
+		status := model.TaskStatusPending
+		if len(deps) == 0 {
+			status = model.TaskStatusReady
+		}
+		task := &model.Task{
+			TaskID:                   taskID,
+			DAGID:                    dagID,
+			SkillName:                spec.SkillName,
+			Status:                   status,
+			PendingDependenciesCount: len(deps),
+			Dependencies:             deps,
+			Children:                 children,
+			Parameters:               spec.Parameters,
+		}
+		s.tasksByID[taskID] = task
+		s.tasksByDAG[dagID] = append(s.tasksByDAG[dagID], taskID)
+	}
+
+	return s.snapshotLocked(sessionID), nil
+}
+
 func (s *Store) PullReadyTask(workerID string, ttl time.Duration) (*model.Task, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

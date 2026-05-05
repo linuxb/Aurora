@@ -364,3 +364,30 @@ func TestJITExpansionRedirectsDownstreamAndReadiesLeaves(t *testing.T) {
 		t.Fatalf("expected final SendEmail task, got=%s", readyFinal.SkillName)
 	}
 }
+
+func TestCreateSessionFromPlanBuildsRuntimeGraph(t *testing.T) {
+	store := NewStore()
+	snapshot, err := store.CreateSessionFromPlan("u-plan", "plan-based creation", []SessionTaskSpec{
+		{RefID: "query", SkillName: "QueryLog"},
+		{RefID: "sum", SkillName: "LLMSummarize", Dependencies: []string{"query"}},
+		{RefID: "mail", SkillName: "SendEmail", Dependencies: []string{"sum"}},
+	})
+	if err != nil {
+		t.Fatalf("create session from plan failed: %v", err)
+	}
+	if got, want := len(snapshot.Tasks), 3; got != want {
+		t.Fatalf("unexpected task count: got=%d want=%d", got, want)
+	}
+	var readyCount int
+	for _, task := range snapshot.Tasks {
+		if task.Status == model.TaskStatusReady {
+			readyCount++
+		}
+		if task.TaskID == "query" || task.TaskID == "sum" || task.TaskID == "mail" {
+			t.Fatalf("expected runtime task_id mapping, got ref id in snapshot: %s", task.TaskID)
+		}
+	}
+	if got, want := readyCount, 1; got != want {
+		t.Fatalf("expected exactly one ready root task, got=%d", got)
+	}
+}
