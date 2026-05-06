@@ -29,6 +29,11 @@
   - event includes `session_id`, `task_id`, and timeline-safe recovery message
 - Added API-level event test:
   - verifies sweep endpoint emits `TASK_SWEEP_EXPIRED` to session event stream
+- Added explicit replanning patch mechanism:
+  - new endpoint: `POST /v1/sessions/{sessionID}/replan`
+  - accepts patch task specs and applies them only when DAG is in `REPLANNING`
+  - scheduler injects patch tasks, restores DAG to `RUNNING`, and resumes execution path
+  - publishes `DAG_REPLAN_APPLIED` event on success
 
 ## Verification
 - `go test ./...` in `apps/arqo` passes including new sweep endpoint test.

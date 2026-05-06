@@ -240,3 +240,61 @@ func TestSweepExpiredPublishesTimelineEvent(t *testing.T) {
 		}
 	}
 }
+
+func TestApplyReplanPatchEndpoint(t *testing.T) {
+	store := scheduler.NewStore()
+	server := NewServer(store, events.NewMemoryBroker())
+	mux := http.NewServeMux()
+	server.Register(mux)
+
+	snapshot, err := store.CreateDemoSession("u-replan-api", "api replan test")
+	if err != nil {
+		t.Fatalf("create session failed: %v", err)
+	}
+	task, err := store.PullReadyTask("worker-1", time.Minute)
+	if err != nil {
+		t.Fatalf("pull failed: %v", err)
+	}
+	if _, err := store.CompleteTask(scheduler.CompleteTaskInput{
+		TaskID:       task.TaskID,
+		WorkerID:     "worker-1",
+		Success:      false,
+		ErrorCode:    "FAIL",
+		ErrorMessage: "force replanning",
+	}); err != nil {
+		t.Fatalf("complete failed: %v", err)
+	}
+
+	body := map[string]any{
+		"reason": "recover by patch",
+		"tasks": []map[string]any{
+			{
+				"ref_id":       "patch_root",
+				"node_type":    "SKILL_SINK",
+				"skill_name":   "QueryLog",
+				"dependencies": []string{},
+			},
+			{
+				"ref_id":       "patch_finish",
+				"node_type":    "SKILL_SINK",
+				"skill_name":   "SendEmail",
+				"dependencies": []string{"patch_root"},
+			},
+		},
+	}
+	raw, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/v1/sessions/"+snapshot.Session.SessionID+"/replan", bytes.NewReader(raw))
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+
+	if got, want := res.Code, http.StatusOK; got != want {
+		t.Fatalf("unexpected status code: got=%d want=%d body=%s", got, want, res.Body.String())
+	}
+	after, err := store.GetSessionSnapshot(snapshot.Session.SessionID)
+	if err != nil {
+		t.Fatalf("snapshot failed: %v", err)
+	}
+	if after.DAG.Status != model.DAGStatusRunning {
+		t.Fatalf("expected DAG RUNNING after api patch, got=%s", after.DAG.Status)
+	}
+}

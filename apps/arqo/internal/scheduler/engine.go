@@ -10,6 +10,7 @@ type Engine interface {
 	CreateDemoSession(userID, intent string) (Snapshot, error)
 	CreateJITDemoSession(userID, intent string) (Snapshot, error)
 	CreateSessionFromPlan(userID, intent string, intentContext map[string]any, tasks []SessionTaskSpec) (Snapshot, error)
+	ApplyReplanPatch(sessionID string, tasks []SessionTaskSpec, reason string) (Snapshot, error)
 	PullReadyTask(workerID string, ttl time.Duration) (*model.Task, error)
 	CompleteTask(input CompleteTaskInput) (*model.Task, error)
 	ExpireRunningTasks(now time.Time) []string

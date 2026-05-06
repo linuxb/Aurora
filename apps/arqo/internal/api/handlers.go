@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"aurora/apps/arqo/internal/events"
+	"aurora/apps/arqo/internal/model"
 	"aurora/apps/arqo/internal/planner"
 	"aurora/apps/arqo/internal/scheduler"
 )
@@ -36,6 +37,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/sessions", s.createSession)
 	mux.HandleFunc("GET /v1/sessions/{sessionID}", s.getSession)
 	mux.HandleFunc("GET /v1/sessions/{sessionID}/events", s.streamSessionEvents)
+	mux.HandleFunc("POST /v1/sessions/{sessionID}/replan", s.applyReplanPatch)
 	mux.HandleFunc("POST /v1/tasks/pull", s.pullTask)
 	mux.HandleFunc("POST /v1/tasks/{taskID}/complete", s.completeTask)
 	mux.HandleFunc("POST /v1/telemetry", s.ingestTelemetry)
@@ -261,6 +263,69 @@ type telemetryRequest struct {
 	Message   string `json:"message"`
 	Source    string `json:"source"`
 	At        string `json:"at"`
+}
+
+type replanPatchRequest struct {
+	Reason string         `json:"reason"`
+	Tasks  []replanTaskIn `json:"tasks"`
+}
+
+type replanTaskIn struct {
+	RefID        string         `json:"ref_id"`
+	NodeType     string         `json:"node_type"`
+	SkillName    string         `json:"skill_name"`
+	Parameters   map[string]any `json:"parameters"`
+	Dependencies []string       `json:"dependencies"`
+}
+
+func (s *Server) applyReplanPatch(w http.ResponseWriter, r *http.Request) {
+	sessionID := strings.TrimSpace(r.PathValue("sessionID"))
+	var req replanPatchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+	if sessionID == "" {
+		respondError(w, http.StatusBadRequest, "invalid_argument", "session_id is required")
+		return
+	}
+	if len(req.Tasks) == 0 {
+		respondError(w, http.StatusBadRequest, "invalid_argument", "tasks are required")
+		return
+	}
+	specs := make([]scheduler.SessionTaskSpec, 0, len(req.Tasks))
+	for _, task := range req.Tasks {
+		nt, err := model.ParseNodeType(task.NodeType)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "invalid_argument", err.Error())
+			return
+		}
+		specs = append(specs, scheduler.SessionTaskSpec{
+			RefID:        task.RefID,
+			NodeType:     nt,
+			SkillName:    task.SkillName,
+			Parameters:   task.Parameters,
+			Dependencies: task.Dependencies,
+		})
+	}
+
+	snapshot, err := s.store.ApplyReplanPatch(sessionID, specs, req.Reason)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, scheduler.ErrReplanNotAllowed) {
+			status = http.StatusConflict
+		}
+		respondError(w, status, "replan_patch_failed", err.Error())
+		return
+	}
+	s.publishEvent(r.Context(), events.Event{
+		SessionID: sessionID,
+		EventType: "DAG_REPLAN_APPLIED",
+		Message:   "replan patch applied",
+		Source:    "arqo",
+		At:        time.Now().UTC(),
+	})
+	respondJSON(w, http.StatusOK, snapshot)
 }
 
 func (s *Server) ingestTelemetry(w http.ResponseWriter, r *http.Request) {

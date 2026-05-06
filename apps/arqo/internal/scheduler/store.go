@@ -14,6 +14,7 @@ var (
 	ErrNoReadyTask     = errors.New("no ready task")
 	ErrTaskNotFound    = errors.New("task not found")
 	ErrTaskNotRunnable = errors.New("task is not running under this worker")
+	ErrReplanNotAllowed = errors.New("replan is allowed only when dag is in REPLANNING")
 )
 
 type CompleteTaskInput struct {
@@ -285,6 +286,94 @@ func (s *Store) CreateSessionFromPlan(userID, intent string, intentContext map[s
 		s.tasksByID[taskID] = task
 		s.tasksByDAG[dagID] = append(s.tasksByDAG[dagID], taskID)
 	}
+
+	return s.snapshotLocked(sessionID), nil
+}
+
+func (s *Store) ApplyReplanPatch(sessionID string, tasks []SessionTaskSpec, reason string) (Snapshot, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, ok := s.sessions[sessionID]
+	if !ok {
+		return Snapshot{}, errors.New("session not found")
+	}
+	dag := s.dags[session.DAGID]
+	if dag.Status != model.DAGStatusReplanning {
+		return Snapshot{}, ErrReplanNotAllowed
+	}
+	if len(tasks) == 0 {
+		return Snapshot{}, errors.New("replan patch tasks are required")
+	}
+
+	refToTaskID := make(map[string]string, len(tasks))
+	for _, spec := range tasks {
+		refToTaskID[spec.RefID] = fmt.Sprintf("task_%06d", s.taskCounter.Add(1))
+	}
+
+	resolvedChildren := make(map[string][]string, len(tasks))
+	for _, spec := range tasks {
+		for _, depRef := range spec.Dependencies {
+			resolvedChildren[depRef] = append(resolvedChildren[depRef], spec.RefID)
+		}
+	}
+
+	for _, spec := range tasks {
+		nodeType := spec.NodeType
+		parsedNodeType, err := model.ParseNodeType(string(nodeType))
+		if err != nil {
+			return Snapshot{}, err
+		}
+		taskID := refToTaskID[spec.RefID]
+		deps := make([]string, 0, len(spec.Dependencies))
+		for _, depRef := range spec.Dependencies {
+			// Dependency can point to an existing runtime task ID or a new ref ID in this patch.
+			if existing := s.tasksByID[depRef]; existing != nil {
+				deps = append(deps, depRef)
+				continue
+			}
+			mapped, mappedOK := refToTaskID[depRef]
+			if !mappedOK {
+				return Snapshot{}, fmt.Errorf("unknown dependency reference: %s", depRef)
+			}
+			deps = append(deps, mapped)
+		}
+		children := make([]string, 0, len(resolvedChildren[spec.RefID]))
+		for _, childRef := range resolvedChildren[spec.RefID] {
+			children = append(children, refToTaskID[childRef])
+		}
+		status := model.TaskStatusPending
+		if len(deps) == 0 || countPendingDependencies(s.tasksByID, deps) == 0 {
+			status = model.TaskStatusReady
+		}
+		params := spec.Parameters
+		if parsedNodeType == model.NodeTypeExpandPlanning {
+			params = injectIntentContext(params, dag.IntentContext)
+		}
+		task := &model.Task{
+			TaskID:                   taskID,
+			DAGID:                    dag.DAGID,
+			NodeType:                 parsedNodeType,
+			SkillName:                spec.SkillName,
+			Status:                   status,
+			PendingDependenciesCount: countPendingDependencies(s.tasksByID, deps),
+			Dependencies:             deps,
+			Children:                 children,
+			Parameters:               params,
+		}
+		s.tasksByID[taskID] = task
+		s.tasksByDAG[dag.DAGID] = append(s.tasksByDAG[dag.DAGID], taskID)
+		for _, depID := range deps {
+			if depTask := s.tasksByID[depID]; depTask != nil && !containsString(depTask.Children, taskID) {
+				depTask.Children = append(depTask.Children, taskID)
+			}
+		}
+	}
+
+	dag.Status = model.DAGStatusRunning
+	s.dags[dag.DAGID] = dag
+	s.rawDataByDAG[dag.DAGID]["replan_patch_reason"] = reason
+	s.rawDataByDAG[dag.DAGID]["replan_patch_at"] = time.Now().UTC().Format(time.RFC3339Nano)
 
 	return s.snapshotLocked(sessionID), nil
 }

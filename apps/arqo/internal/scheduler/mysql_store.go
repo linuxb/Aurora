@@ -322,6 +322,124 @@ func (s *MySQLStore) CreateSessionFromPlan(userID, intent string, intentContext 
 	return s.GetSessionSnapshot(sessionID)
 }
 
+func (s *MySQLStore) ApplyReplanPatch(sessionID string, tasks []SessionTaskSpec, reason string) (Snapshot, error) {
+	_ = reason
+	if len(tasks) == 0 {
+		return Snapshot{}, errors.New("replan patch tasks are required")
+	}
+	tx, err := s.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var dag model.DAG
+	var rawIntentContext sql.NullString
+	row := tx.QueryRow(`
+SELECT d.dag_id, d.session_id, d.user_id, d.original_intent, d.intent_context_json, d.status, d.replan_count, d.current_depth, d.max_depth, d.jit_unmapped_streak, d.max_unmapped_streak, d.created_at
+FROM dags d
+JOIN sessions s ON s.dag_id = d.dag_id
+WHERE s.session_id=?
+FOR UPDATE`, sessionID)
+	var dagStatus string
+	if err := row.Scan(
+		&dag.DAGID, &dag.SessionID, &dag.UserID, &dag.OriginalIntent, &rawIntentContext, &dagStatus,
+		&dag.ReplanCount, &dag.CurrentDepth, &dag.MaxDepth, &dag.JITUnmappedStreak, &dag.MaxUnmappedStreak, &dag.CreatedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Snapshot{}, errors.New("session not found")
+		}
+		return Snapshot{}, err
+	}
+	dag.Status = model.DAGStatus(dagStatus)
+	if dag.Status != model.DAGStatusReplanning {
+		return Snapshot{}, ErrReplanNotAllowed
+	}
+	if rawIntentContext.Valid && rawIntentContext.String != "" && rawIntentContext.String != "null" {
+		_ = json.Unmarshal([]byte(rawIntentContext.String), &dag.IntentContext)
+	}
+
+	refToTaskID := make(map[string]string, len(tasks))
+	for _, spec := range tasks {
+		id, idErr := newPrefixedID("task")
+		if idErr != nil {
+			return Snapshot{}, idErr
+		}
+		refToTaskID[spec.RefID] = id
+	}
+	childRefs := make(map[string][]string, len(tasks))
+	for _, spec := range tasks {
+		for _, depRef := range spec.Dependencies {
+			childRefs[depRef] = append(childRefs[depRef], spec.RefID)
+		}
+	}
+
+	for _, spec := range tasks {
+		parsedNodeType, parseErr := model.ParseNodeType(string(spec.NodeType))
+		if parseErr != nil {
+			return Snapshot{}, parseErr
+		}
+		taskID := refToTaskID[spec.RefID]
+		deps := make([]string, 0, len(spec.Dependencies))
+		for _, depRef := range spec.Dependencies {
+			if mapped, ok := refToTaskID[depRef]; ok {
+				deps = append(deps, mapped)
+				continue
+			}
+			var exists string
+			err := tx.QueryRow(`SELECT task_id FROM tasks WHERE task_id=?`, depRef).Scan(&exists)
+			if err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return Snapshot{}, fmt.Errorf("unknown dependency reference: %s", depRef)
+				}
+				return Snapshot{}, err
+			}
+			deps = append(deps, depRef)
+		}
+		children := make([]string, 0, len(childRefs[spec.RefID]))
+		for _, childRef := range childRefs[spec.RefID] {
+			children = append(children, refToTaskID[childRef])
+		}
+		pending := 0
+		for _, depID := range deps {
+			var status string
+			if err := tx.QueryRow(`SELECT status FROM tasks WHERE task_id=?`, depID).Scan(&status); err != nil {
+				return Snapshot{}, err
+			}
+			if status != string(model.TaskStatusSuccess) {
+				pending++
+			}
+		}
+		taskStatus := "PENDING"
+		if pending == 0 {
+			taskStatus = "READY"
+		}
+		params := spec.Parameters
+		if parsedNodeType == model.NodeTypeExpandPlanning {
+			params = injectIntentContext(params, dag.IntentContext)
+		}
+		if err := s.insertTask(tx, taskID, dag.DAGID, string(parsedNodeType), spec.SkillName, taskStatus, pending, deps, children, params, time.Now().UTC()); err != nil {
+			return Snapshot{}, err
+		}
+		for _, depID := range deps {
+			_, err := tx.Exec(`UPDATE tasks SET children_json = JSON_ARRAY_APPEND(children_json, '$', ?) WHERE task_id=? AND JSON_SEARCH(children_json, 'one', ?) IS NULL`, taskID, depID, taskID)
+			if err != nil {
+				return Snapshot{}, err
+			}
+		}
+	}
+
+	_, err = tx.Exec(`UPDATE dags SET status='RUNNING' WHERE dag_id=?`, dag.DAGID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return Snapshot{}, err
+	}
+	return s.GetSessionSnapshot(sessionID)
+}
+
 func (s *MySQLStore) PullReadyTask(workerID string, ttl time.Duration) (*model.Task, error) {
 	tx, err := s.db.BeginTx(context.Background(), nil)
 	if err != nil {

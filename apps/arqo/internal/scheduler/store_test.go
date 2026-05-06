@@ -475,6 +475,55 @@ func TestExpireRunningTasksRetryReadyPolicy(t *testing.T) {
 	}
 }
 
+func TestApplyReplanPatchRecoversDagToRunning(t *testing.T) {
+	store := NewStore()
+	snapshot, err := store.CreateDemoSession("u-replan", "replan needed")
+	if err != nil {
+		t.Fatalf("create session failed: %v", err)
+	}
+	task, err := store.PullReadyTask("worker-1", time.Minute)
+	if err != nil {
+		t.Fatalf("pull failed: %v", err)
+	}
+	if _, err := store.CompleteTask(CompleteTaskInput{
+		TaskID:       task.TaskID,
+		WorkerID:     "worker-1",
+		Success:      false,
+		ErrorCode:    "UPSTREAM_ERROR",
+		ErrorMessage: "simulated failure",
+	}); err != nil {
+		t.Fatalf("complete failed: %v", err)
+	}
+
+	before, err := store.GetSessionSnapshot(snapshot.Session.SessionID)
+	if err != nil {
+		t.Fatalf("snapshot failed: %v", err)
+	}
+	if before.DAG.Status != model.DAGStatusReplanning {
+		t.Fatalf("expected REPLANNING, got=%s", before.DAG.Status)
+	}
+
+	after, err := store.ApplyReplanPatch(snapshot.Session.SessionID, []SessionTaskSpec{
+		{RefID: "patch_root", NodeType: model.NodeTypeSkillSink, SkillName: "QueryLog"},
+		{RefID: "patch_finish", NodeType: model.NodeTypeSkillSink, SkillName: "SendEmail", Dependencies: []string{"patch_root"}},
+	}, "recover from upstream failure")
+	if err != nil {
+		t.Fatalf("apply replan patch failed: %v", err)
+	}
+	if after.DAG.Status != model.DAGStatusRunning {
+		t.Fatalf("expected DAG RUNNING after patch, got=%s", after.DAG.Status)
+	}
+	foundReady := false
+	for _, tsk := range after.Tasks {
+		if tsk.SkillName == "QueryLog" && tsk.Status == model.TaskStatusReady {
+			foundReady = true
+		}
+	}
+	if !foundReady {
+		t.Fatalf("expected replan root task READY, tasks=%v", after.Tasks)
+	}
+}
+
 func TestCreateSessionFromPlanMixedNodeTypeFixture(t *testing.T) {
 	store := NewStore()
 	intentContext := map[string]any{
