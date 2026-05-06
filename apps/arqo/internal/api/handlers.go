@@ -81,7 +81,11 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	plan := s.planner.Plan(req.Intent, req.PlanningMode)
+	plan, err := s.planner.Plan(req.Intent, req.PlanningMode)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "plan_generation_failed", err.Error())
+		return
+	}
 	validation := planner.ValidateDAG(plan.Nodes)
 	plan.Warnings = validation.Warnings
 	if !validation.Valid {
@@ -96,7 +100,6 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var snapshot scheduler.Snapshot
-	var err error
 	snapshot, err = s.store.CreateSessionFromPlan(req.UserID, req.Intent, plan.IntentContext, toSessionTaskSpecs(plan.Nodes))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "create_session_failed", err.Error())

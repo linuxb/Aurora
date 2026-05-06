@@ -43,11 +43,16 @@
 - Added DAG-level intent context propagation:
   - `intent_context` persisted on DAG (memory + MySQL/TiDB)
   - expanding nodes auto-inject `intent_context` into task `parameters` for every ReActPlanner call
+- Added planner backend failover contract:
+  - `Router.Plan(...)` now returns `(Plan, error)`
+  - added `ModelRouter` stub + `FallbackRouter`
+  - `ARQO_PLANNER_BACKEND=model` supports `ARQO_PLANNER_FALLBACK=mock|none`
+  - API now returns `plan_generation_failed` when router cannot produce a plan
 
 ## Verification
 - `go test ./...` in `apps/arqo` passes with validator tests included.
 
 ## Pending in Phase 2
-- Define model-backed planner contract and fallback behavior (`mock` -> `model` failover policy).
-- Add plan-to-scheduler mapping layer to support non-demo DAG creation from planner output.
-- Extend API/schema tests for plan metadata compatibility and versioning.
+- Implement real model-backed planner adapter (replace current stub) and prompt/schema contract.
+- Add compatibility/version tests for `plan` payload fields (`plan_id/source/intent_context/nodes`).
+- Add deterministic fixture tests for multi-node mixed `node_type` plans.
