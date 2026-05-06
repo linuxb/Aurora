@@ -1,4 +1,4 @@
-# Aurora Agentic Service (MVP Scaffold)
+# <img src="img/icon.png" height="64" style="vertical-align: middle;" /> Aurora Agentic Service (MVP Scaffold)
 
 This repository contains a runnable multi-language MVP scaffold for the Aurora Agentic Service:
 - `arqo` (Go): gateway + DAG scheduler core
