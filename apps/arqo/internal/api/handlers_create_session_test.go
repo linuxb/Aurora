@@ -8,8 +8,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"aurora/apps/arqo/internal/events"
+	"aurora/apps/arqo/internal/model"
 	"aurora/apps/arqo/internal/planner"
 	"aurora/apps/arqo/internal/scheduler"
 )
@@ -140,5 +142,53 @@ func TestCreateSessionPlanGenerationFailure(t *testing.T) {
 	mux.ServeHTTP(res, req)
 	if got, want := res.Code, http.StatusInternalServerError; got != want {
 		t.Fatalf("unexpected status code: got=%d want=%d body=%s", got, want, res.Body.String())
+	}
+}
+
+func TestSweepExpiredEndpoint(t *testing.T) {
+	store := scheduler.NewStore()
+	server := NewServer(store, events.NewMemoryBroker())
+	mux := http.NewServeMux()
+	server.Register(mux)
+
+	snapshot, err := store.CreateDemoSession("u-sweep", "sweep test")
+	if err != nil {
+		t.Fatalf("create demo session failed: %v", err)
+	}
+	task, err := store.PullReadyTask("sweeper-worker", -1*time.Second)
+	if err != nil {
+		t.Fatalf("pull failed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/admin/sweep-expired", nil)
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+	if got, want := res.Code, http.StatusOK; got != want {
+		t.Fatalf("unexpected status code: got=%d want=%d body=%s", got, want, res.Body.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	if got := int(payload["count"].(float64)); got < 1 {
+		t.Fatalf("expected at least one expired task, got=%d payload=%v", got, payload)
+	}
+
+	updated, err := store.GetSessionSnapshot(snapshot.Session.SessionID)
+	if err != nil {
+		t.Fatalf("snapshot failed: %v", err)
+	}
+	found := false
+	for _, tsk := range updated.Tasks {
+		if tsk.TaskID == task.TaskID {
+			found = true
+			if tsk.Status != model.TaskStatusFailed {
+				t.Fatalf("expected swept task to become FAILED, got=%s", tsk.Status)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("task not found after sweep: %s", task.TaskID)
 	}
 }

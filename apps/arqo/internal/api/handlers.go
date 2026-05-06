@@ -39,6 +39,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/tasks/pull", s.pullTask)
 	mux.HandleFunc("POST /v1/tasks/{taskID}/complete", s.completeTask)
 	mux.HandleFunc("POST /v1/telemetry", s.ingestTelemetry)
+	mux.HandleFunc("POST /v1/admin/sweep-expired", s.sweepExpired)
 }
 
 func (s *Server) healthz(w http.ResponseWriter, _ *http.Request) {
@@ -350,6 +351,14 @@ func (s *Server) streamSessionEvents(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
+}
+
+func (s *Server) sweepExpired(w http.ResponseWriter, r *http.Request) {
+	expired := s.store.ExpireRunningTasks(time.Now().UTC())
+	respondJSON(w, http.StatusOK, map[string]any{
+		"expired_task_ids": expired,
+		"count":            len(expired),
+	})
 }
 
 func (s *Server) publishEvent(ctx context.Context, evt events.Event) {
