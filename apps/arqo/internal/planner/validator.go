@@ -5,11 +5,11 @@ import "fmt"
 import "aurora/apps/arqo/internal/model"
 
 type Node struct {
-	NodeID       string
-	NodeType     model.NodeType
-	SkillName    string
-	Parameters   map[string]any
-	Dependencies []string
+	NodeID       string         `json:"node_id"`
+	NodeType     model.NodeType `json:"node_type"`
+	SkillName    string         `json:"skill_name"`
+	Parameters   map[string]any `json:"parameters,omitempty"`
+	Dependencies []string       `json:"dependencies"`
 }
 
 type ValidationErrorCode string

@@ -48,11 +48,15 @@
   - added `ModelRouter` stub + `FallbackRouter`
   - `ARQO_PLANNER_BACKEND=model` supports `ARQO_PLANNER_FALLBACK=mock|none`
   - API now returns `plan_generation_failed` when router cannot produce a plan
+- Replaced model planner stub with HTTP adapter:
+  - `ModelRouter` now calls configurable endpoint (`ARQO_PLANNER_MODEL_URL`)
+  - request includes `intent`, `planning_mode`, `model`, `schema`
+  - supports both `{ plan: {...} }` and flat plan response forms
+  - added tests for unavailable endpoint and successful model plan decode
 
 ## Verification
 - `go test ./...` in `apps/arqo` passes with validator tests included.
 
 ## Pending in Phase 2
-- Implement real model-backed planner adapter (replace current stub) and prompt/schema contract.
 - Add compatibility/version tests for `plan` payload fields (`plan_id/source/intent_context/nodes`).
 - Add deterministic fixture tests for multi-node mixed `node_type` plans.

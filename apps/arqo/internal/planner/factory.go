@@ -16,15 +16,16 @@ func NewRouterFromEnv() (Router, string, error) {
 	case "mock":
 		return NewMockRouter(), backend, nil
 	case "model":
+		modelRouter := NewModelRouterFromEnv()
 		fallback := strings.ToLower(strings.TrimSpace(os.Getenv("ARQO_PLANNER_FALLBACK")))
 		if fallback == "" {
 			fallback = "mock"
 		}
 		switch fallback {
 		case "mock":
-			return NewFallbackRouter(NewModelRouter(), NewMockRouter()), "model->mock", nil
+			return NewFallbackRouter(modelRouter, NewMockRouter()), "model->mock", nil
 		case "none":
-			return NewModelRouter(), "model", nil
+			return modelRouter, "model", nil
 		default:
 			return nil, "", fmt.Errorf("unsupported planner fallback backend: %s", fallback)
 		}
