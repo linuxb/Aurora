@@ -37,6 +37,8 @@ type Snapshot struct {
 type Store struct {
 	mu sync.Mutex
 
+	leaseExpirePolicy LeaseExpirePolicy
+
 	sessionCounter atomic.Uint64
 	dagCounter     atomic.Uint64
 	taskCounter    atomic.Uint64
@@ -49,7 +51,12 @@ type Store struct {
 }
 
 func NewStore() *Store {
+	return NewStoreWithLeasePolicy(LeaseExpirePolicyFailedReplan)
+}
+
+func NewStoreWithLeasePolicy(policy LeaseExpirePolicy) *Store {
 	return &Store{
+		leaseExpirePolicy: parseLeaseExpirePolicy(string(policy)),
 		sessions:     make(map[string]model.Session),
 		dags:         make(map[string]model.DAG),
 		tasksByID:    make(map[string]*model.Task),
@@ -611,17 +618,25 @@ func (s *Store) ExpireRunningTasks(now time.Time) []string {
 		if task.ExpireAt.After(now) {
 			continue
 		}
-		task.Status = model.TaskStatusFailed
-		task.OwnerID = ""
-		task.ExpireAt = nil
-		task.LastErrorCode = "WORKER_TIMEOUT"
-		task.LastHumanReadableErrorMsg = "worker lease expired"
 		expired = append(expired, task.TaskID)
-
-		dag := s.dags[task.DAGID]
-		dag.Status = model.DAGStatusReplanning
-		dag.ReplanCount++
-		s.dags[task.DAGID] = dag
+		switch s.leaseExpirePolicy {
+		case LeaseExpirePolicyRetryReady:
+			task.Status = model.TaskStatusReady
+			task.OwnerID = ""
+			task.ExpireAt = nil
+			task.LastErrorCode = "WORKER_TIMEOUT_RETRY"
+			task.LastHumanReadableErrorMsg = "worker lease expired, task returned to ready queue"
+		default:
+			task.Status = model.TaskStatusFailed
+			task.OwnerID = ""
+			task.ExpireAt = nil
+			task.LastErrorCode = "WORKER_TIMEOUT"
+			task.LastHumanReadableErrorMsg = "worker lease expired"
+			dag := s.dags[task.DAGID]
+			dag.Status = model.DAGStatusReplanning
+			dag.ReplanCount++
+			s.dags[task.DAGID] = dag
+		}
 	}
 	return expired
 }

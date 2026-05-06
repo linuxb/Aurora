@@ -445,6 +445,36 @@ func TestCreateSessionFromPlanBuildsRuntimeGraph(t *testing.T) {
 	}
 }
 
+func TestExpireRunningTasksRetryReadyPolicy(t *testing.T) {
+	store := NewStoreWithLeasePolicy(LeaseExpirePolicyRetryReady)
+	snapshot, err := store.CreateDemoSession("u-retry", "retry expired lease")
+	if err != nil {
+		t.Fatalf("create session failed: %v", err)
+	}
+	task, err := store.PullReadyTask("worker-retry", -1*time.Second)
+	if err != nil {
+		t.Fatalf("pull failed: %v", err)
+	}
+	expired := store.ExpireRunningTasks(time.Now().UTC())
+	if len(expired) != 1 || expired[0] != task.TaskID {
+		t.Fatalf("unexpected expired ids: %v", expired)
+	}
+	final, err := store.GetSessionSnapshot(snapshot.Session.SessionID)
+	if err != nil {
+		t.Fatalf("snapshot failed: %v", err)
+	}
+	for _, tsk := range final.Tasks {
+		if tsk.TaskID == task.TaskID {
+			if tsk.Status != model.TaskStatusReady {
+				t.Fatalf("expected task status READY, got=%s", tsk.Status)
+			}
+		}
+	}
+	if final.DAG.Status != model.DAGStatusRunning {
+		t.Fatalf("expected dag to remain RUNNING, got=%s", final.DAG.Status)
+	}
+}
+
 func TestCreateSessionFromPlanMixedNodeTypeFixture(t *testing.T) {
 	store := NewStore()
 	intentContext := map[string]any{

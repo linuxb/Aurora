@@ -16,8 +16,9 @@ import (
 )
 
 type MySQLStore struct {
-	db      *sql.DB
-	dialect string
+	db                *sql.DB
+	dialect           string
+	leaseExpirePolicy LeaseExpirePolicy
 }
 
 func NewMySQLStoreFromEnv() (*MySQLStore, error) {
@@ -53,7 +54,7 @@ func newSQLCompatibleStore(dsn string, dialect string) (*MySQLStore, error) {
 		return nil, fmt.Errorf("open %s failed: %w", dialect, err)
 	}
 
-	store := &MySQLStore{db: db, dialect: dialect}
+	store := &MySQLStore{db: db, dialect: dialect, leaseExpirePolicy: LeaseExpirePolicyFailedReplan}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
@@ -79,7 +80,7 @@ func isMySQLDriverRegistered() bool {
 }
 
 func newMySQLStoreWithDB(db *sql.DB) *MySQLStore {
-	return &MySQLStore{db: db, dialect: "mysql"}
+	return &MySQLStore{db: db, dialect: "mysql", leaseExpirePolicy: LeaseExpirePolicyFailedReplan}
 }
 
 func (s *MySQLStore) CreateDemoSession(userID, intent string) (Snapshot, error) {
@@ -489,18 +490,29 @@ FOR UPDATE`, now)
 	}
 
 	for _, taskID := range taskIDs {
-		_, err := tx.Exec(`
+		var stmt string
+		if s.leaseExpirePolicy == LeaseExpirePolicyRetryReady {
+			stmt = `
+UPDATE tasks
+SET status='READY', owner_id=NULL, expire_at=NULL, last_error_code='WORKER_TIMEOUT_RETRY', last_human_readable_error_msg='worker lease expired, task returned to ready queue'
+WHERE task_id=?`
+		} else {
+			stmt = `
 UPDATE tasks
 SET status='FAILED', owner_id=NULL, expire_at=NULL, last_error_code='WORKER_TIMEOUT', last_human_readable_error_msg='worker lease expired'
-WHERE task_id=?`, taskID)
+WHERE task_id=?`
+		}
+		_, err := tx.Exec(stmt, taskID)
 		if err != nil {
 			return nil
 		}
 	}
-	for dagID := range dagSet {
-		_, err := tx.Exec(`UPDATE dags SET status='REPLANNING', replan_count = replan_count + 1 WHERE dag_id=?`, dagID)
-		if err != nil {
-			return nil
+	if s.leaseExpirePolicy != LeaseExpirePolicyRetryReady {
+		for dagID := range dagSet {
+			_, err := tx.Exec(`UPDATE dags SET status='REPLANNING', replan_count = replan_count + 1 WHERE dag_id=?`, dagID)
+			if err != nil {
+				return nil
+			}
 		}
 	}
 

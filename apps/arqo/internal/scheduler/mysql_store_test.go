@@ -116,3 +116,62 @@ func TestMySQLStorePullReadyTaskNoRows(t *testing.T) {
 		t.Fatalf("sqlmock expectations not met: %v", err)
 	}
 }
+
+func TestMySQLStoreExpireRunningTasksFailedReplanPolicy(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock new failed: %v", err)
+	}
+	defer db.Close()
+
+	store := newMySQLStoreWithDB(db)
+	store.leaseExpirePolicy = LeaseExpirePolicyFailedReplan
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT task_id, dag_id`).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"task_id", "dag_id"}).AddRow("task_1", "dag_1"))
+	mock.ExpectExec(`UPDATE tasks`).
+		WithArgs("task_1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`UPDATE dags SET status='REPLANNING', replan_count = replan_count \+ 1 WHERE dag_id=\?`).
+		WithArgs("dag_1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	expired := store.ExpireRunningTasks(time.Now().UTC())
+	if len(expired) != 1 || expired[0] != "task_1" {
+		t.Fatalf("unexpected expired task ids: %v", expired)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sqlmock expectations not met: %v", err)
+	}
+}
+
+func TestMySQLStoreExpireRunningTasksRetryReadyPolicy(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock new failed: %v", err)
+	}
+	defer db.Close()
+
+	store := newMySQLStoreWithDB(db)
+	store.leaseExpirePolicy = LeaseExpirePolicyRetryReady
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT task_id, dag_id`).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"task_id", "dag_id"}).AddRow("task_1", "dag_1"))
+	mock.ExpectExec(`UPDATE tasks`).
+		WithArgs("task_1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	expired := store.ExpireRunningTasks(time.Now().UTC())
+	if len(expired) != 1 || expired[0] != "task_1" {
+		t.Fatalf("unexpected expired task ids: %v", expired)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sqlmock expectations not met: %v", err)
+	}
+}
