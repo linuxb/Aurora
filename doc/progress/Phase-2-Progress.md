@@ -32,6 +32,17 @@
   - memory + MySQL/TiDB backends now build tasks from planner nodes
   - planner node `ref_id` is mapped to unique runtime `task_id` per session
   - `POST /v1/sessions` now creates sessions from planner output instead of fixed demo graph
+- Added Intent Router lightweight-model mock extraction path:
+  - new `LightweightIntentModel` interface + `MockLightweightIntentModel`
+  - planner now emits `intent_context` into `planner.Plan`
+- Added JIT expansion recursion guard for missing-skill scenarios:
+  - expansion payload now supports `mapping_status` and node `node_type`
+  - scheduler now supports dynamic expansion with both `SKILL_SINK` and `EXPAND_PLANNING` nodes
+  - added `ErrSkillMappingExhausted` with `MISSING_SKILL` task error propagation
+  - after consecutive unmapped expansions reaches threshold (`max_unmapped_streak`), API returns `422 missing_skill`
+- Added DAG-level intent context propagation:
+  - `intent_context` persisted on DAG (memory + MySQL/TiDB)
+  - expanding nodes auto-inject `intent_context` into task `parameters` for every ReActPlanner call
 
 ## Verification
 - `go test ./...` in `apps/arqo` passes with validator tests included.

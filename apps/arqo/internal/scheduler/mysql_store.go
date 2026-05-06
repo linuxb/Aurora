@@ -123,12 +123,14 @@ func (s *MySQLStore) CreateDemoSession(userID, intent string) (Snapshot, error) 
 		return Snapshot{}, err
 	}
 
+	intentContextJSON, _ := json.Marshal(map[string]any{"original_intent": intent, "source": "demo"})
 	_, err = tx.Exec(
-		`INSERT INTO dags (dag_id, session_id, user_id, original_intent, status, replan_count, current_depth, max_depth, created_at) VALUES (?, ?, ?, ?, 'RUNNING', 0, 1, 10, ?)`,
+		`INSERT INTO dags (dag_id, session_id, user_id, original_intent, intent_context_json, status, replan_count, current_depth, max_depth, jit_unmapped_streak, max_unmapped_streak, created_at) VALUES (?, ?, ?, ?, ?, 'RUNNING', 0, 1, 10, 0, 3, ?)`,
 		dagID,
 		sessionID,
 		userID,
 		intent,
+		string(intentContextJSON),
 		now,
 	)
 	if err != nil {
@@ -192,18 +194,20 @@ func (s *MySQLStore) CreateJITDemoSession(userID, intent string) (Snapshot, erro
 	if err != nil {
 		return Snapshot{}, err
 	}
+	intentContextJSON, _ := json.Marshal(map[string]any{"original_intent": intent, "source": "jit_demo"})
 	_, err = tx.Exec(
-		`INSERT INTO dags (dag_id, session_id, user_id, original_intent, status, replan_count, current_depth, max_depth, created_at) VALUES (?, ?, ?, ?, 'RUNNING', 0, 1, 10, ?)`,
+		`INSERT INTO dags (dag_id, session_id, user_id, original_intent, intent_context_json, status, replan_count, current_depth, max_depth, jit_unmapped_streak, max_unmapped_streak, created_at) VALUES (?, ?, ?, ?, ?, 'RUNNING', 0, 1, 10, 0, 3, ?)`,
 		dagID,
 		sessionID,
 		userID,
 		intent,
+		string(intentContextJSON),
 		now,
 	)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if err := s.insertTask(tx, plannerTaskID, dagID, string(model.NodeTypeExpandPlanning), "ReActPlanner", "READY", 0, []string{}, []string{finalTaskID}, nil, now); err != nil {
+	if err := s.insertTask(tx, plannerTaskID, dagID, string(model.NodeTypeExpandPlanning), "ReActPlanner", "READY", 0, []string{}, []string{finalTaskID}, map[string]any{"intent_context": map[string]any{"original_intent": intent, "source": "jit_demo"}}, now); err != nil {
 		return Snapshot{}, err
 	}
 	if err := s.insertTask(tx, finalTaskID, dagID, string(model.NodeTypeSkillSink), "SendEmail", "PENDING", 1, []string{plannerTaskID}, []string{}, nil, now); err != nil {
@@ -215,7 +219,7 @@ func (s *MySQLStore) CreateJITDemoSession(userID, intent string) (Snapshot, erro
 	return s.GetSessionSnapshot(sessionID)
 }
 
-func (s *MySQLStore) CreateSessionFromPlan(userID, intent string, tasks []SessionTaskSpec) (Snapshot, error) {
+func (s *MySQLStore) CreateSessionFromPlan(userID, intent string, intentContext map[string]any, tasks []SessionTaskSpec) (Snapshot, error) {
 	sessionID, err := newPrefixedID("sess")
 	if err != nil {
 		return Snapshot{}, err
@@ -294,15 +298,20 @@ func (s *MySQLStore) CreateSessionFromPlan(userID, intent string, tasks []Sessio
 	if err != nil {
 		return Snapshot{}, err
 	}
+	intentContextJSON, _ := json.Marshal(cloneMap(intentContext))
 	_, err = tx.Exec(
-		`INSERT INTO dags (dag_id, session_id, user_id, original_intent, status, replan_count, current_depth, max_depth, created_at) VALUES (?, ?, ?, ?, 'RUNNING', 0, 1, 10, ?)`,
-		dagID, sessionID, userID, intent, now,
+		`INSERT INTO dags (dag_id, session_id, user_id, original_intent, intent_context_json, status, replan_count, current_depth, max_depth, jit_unmapped_streak, max_unmapped_streak, created_at) VALUES (?, ?, ?, ?, ?, 'RUNNING', 0, 1, 10, 0, 3, ?)`,
+		dagID, sessionID, userID, intent, string(intentContextJSON), now,
 	)
 	if err != nil {
 		return Snapshot{}, err
 	}
 	for _, rt := range runtimeTasks {
-		if err := s.insertTask(tx, rt.taskID, dagID, string(rt.spec.NodeType), rt.spec.SkillName, rt.taskStatus, rt.pending, rt.deps, rt.children, rt.spec.Parameters, now); err != nil {
+		params := rt.spec.Parameters
+		if rt.spec.NodeType == model.NodeTypeExpandPlanning {
+			params = injectIntentContext(params, intentContext)
+		}
+		if err := s.insertTask(tx, rt.taskID, dagID, string(rt.spec.NodeType), rt.spec.SkillName, rt.taskStatus, rt.pending, rt.deps, rt.children, params, now); err != nil {
 			return Snapshot{}, err
 		}
 	}
@@ -507,14 +516,15 @@ func (s *MySQLStore) GetSessionSnapshot(sessionID string) (Snapshot, error) {
 
 	row := s.db.QueryRow(`
 SELECT s.session_id, s.dag_id, s.user_id, s.intent, s.created_at,
-       d.dag_id, d.session_id, d.user_id, d.original_intent, d.status, d.replan_count, d.current_depth, d.max_depth, d.created_at
+       d.dag_id, d.session_id, d.user_id, d.original_intent, d.intent_context_json, d.status, d.replan_count, d.current_depth, d.max_depth, d.jit_unmapped_streak, d.max_unmapped_streak, d.created_at
 FROM sessions s
 JOIN dags d ON d.session_id = s.session_id
 WHERE s.session_id = ?`, sessionID)
 	var dagStatus string
+	var rawIntentContext sql.NullString
 	if err := row.Scan(
 		&session.SessionID, &session.DAGID, &session.UserID, &session.Intent, &session.CreatedAt,
-		&dag.DAGID, &dag.SessionID, &dag.UserID, &dag.OriginalIntent, &dagStatus, &dag.ReplanCount, &dag.CurrentDepth, &dag.MaxDepth, &dag.CreatedAt,
+		&dag.DAGID, &dag.SessionID, &dag.UserID, &dag.OriginalIntent, &rawIntentContext, &dagStatus, &dag.ReplanCount, &dag.CurrentDepth, &dag.MaxDepth, &dag.JITUnmappedStreak, &dag.MaxUnmappedStreak, &dag.CreatedAt,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Snapshot{}, errors.New("session not found")
@@ -522,6 +532,9 @@ WHERE s.session_id = ?`, sessionID)
 		return Snapshot{}, err
 	}
 	dag.Status = model.DAGStatus(dagStatus)
+	if rawIntentContext.Valid && rawIntentContext.String != "" && rawIntentContext.String != "null" {
+		_ = json.Unmarshal([]byte(rawIntentContext.String), &dag.IntentContext)
+	}
 
 	rows, err := s.db.Query(`
 SELECT task_id, dag_id, node_type, skill_name, status, pending_dependencies_count, owner_id, expire_at,
@@ -595,10 +608,13 @@ CREATE TABLE IF NOT EXISTS dags (
     session_id VARCHAR(64) NOT NULL,
     user_id VARCHAR(64) NOT NULL,
     original_intent TEXT NOT NULL,
+    intent_context_json LONGTEXT NULL,
     status VARCHAR(20) NOT NULL,
     replan_count INT NOT NULL DEFAULT 0,
     current_depth INT NOT NULL DEFAULT 1,
     max_depth INT NOT NULL DEFAULT 10,
+    jit_unmapped_streak INT NOT NULL DEFAULT 0,
+    max_unmapped_streak INT NOT NULL DEFAULT 3,
     created_at DATETIME(6) NOT NULL,
     INDEX idx_dag_session_id (session_id)
 );
@@ -636,6 +652,15 @@ CREATE TABLE IF NOT EXISTS task_raw_data (
 	}
 	if _, err := s.db.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS node_type VARCHAR(32) NOT NULL DEFAULT 'SKILL_SINK'`); err != nil {
 		return fmt.Errorf("ensure node_type column failed: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `ALTER TABLE dags ADD COLUMN IF NOT EXISTS intent_context_json LONGTEXT NULL`); err != nil {
+		return fmt.Errorf("ensure intent_context_json column failed: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `ALTER TABLE dags ADD COLUMN IF NOT EXISTS jit_unmapped_streak INT NOT NULL DEFAULT 0`); err != nil {
+		return fmt.Errorf("ensure jit_unmapped_streak column failed: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `ALTER TABLE dags ADD COLUMN IF NOT EXISTS max_unmapped_streak INT NOT NULL DEFAULT 3`); err != nil {
+		return fmt.Errorf("ensure max_unmapped_streak column failed: %w", err)
 	}
 	if _, err := s.db.ExecContext(ctx, `UPDATE tasks SET node_type='EXPAND_PLANNING' WHERE node_type='EXPANDING'`); err != nil {
 		return fmt.Errorf("normalize node_type values failed: %w", err)
@@ -697,13 +722,18 @@ func (s *MySQLStore) applyExpansionTx(tx *sql.Tx, planner *model.Task, input Com
 	if payload == nil || len(payload.NewNodes) == 0 {
 		return ErrExpansionInvalid
 	}
+	mappingStatus := normalizeMappingStatus(payload.MappingStatus)
+	if mappingStatus != ExpansionMappingMapped && mappingStatus != ExpansionMappingUnmapped {
+		return ErrExpansionInvalid
+	}
 	if payload.DownstreamWiring.RedirectFrom != planner.TaskID || len(payload.DownstreamWiring.RedirectTo) == 0 {
 		return ErrExpansionInvalid
 	}
 
-	var currentDepth, maxDepth int
-	row := tx.QueryRow(`SELECT current_depth, max_depth FROM dags WHERE dag_id=? FOR UPDATE`, planner.DAGID)
-	if err := row.Scan(&currentDepth, &maxDepth); err != nil {
+	var currentDepth, maxDepth, unmappedStreak, maxUnmappedStreak int
+	var rawIntentContext sql.NullString
+	row := tx.QueryRow(`SELECT current_depth, max_depth, jit_unmapped_streak, max_unmapped_streak, intent_context_json FROM dags WHERE dag_id=? FOR UPDATE`, planner.DAGID)
+	if err := row.Scan(&currentDepth, &maxDepth, &unmappedStreak, &maxUnmappedStreak, &rawIntentContext); err != nil {
 		return err
 	}
 	if maxDepth == 0 {
@@ -717,11 +747,37 @@ WHERE task_id=?`, planner.TaskID)
 		_, _ = tx.Exec(`UPDATE dags SET status='REPLANNING', replan_count = replan_count + 1 WHERE dag_id=?`, planner.DAGID)
 		return ErrExpansionDepthExceeded
 	}
+	if maxUnmappedStreak <= 0 {
+		maxUnmappedStreak = 3
+	}
+	nextUnmappedStreak := 0
+	if mappingStatus == ExpansionMappingUnmapped {
+		nextUnmappedStreak = unmappedStreak + 1
+		if nextUnmappedStreak >= maxUnmappedStreak {
+			_, _ = tx.Exec(`
+UPDATE tasks
+SET status='FAILED', owner_id=NULL, expire_at=NULL, last_error_code='MISSING_SKILL', last_human_readable_error_msg='skill mapping exhausted, missing required skill'
+WHERE task_id=?`, planner.TaskID)
+			_, _ = tx.Exec(`UPDATE dags SET status='REPLANNING', replan_count = replan_count + 1, jit_unmapped_streak=? WHERE dag_id=?`, nextUnmappedStreak, planner.DAGID)
+			return ErrSkillMappingExhausted
+		}
+	}
 
 	// Validate node IDs and dependencies.
 	newNodes := make(map[string]ExpansionNode, len(payload.NewNodes))
 	for _, node := range payload.NewNodes {
-		if node.NodeID == "" || node.SkillName == "" {
+		if node.NodeID == "" || node.NodeType == "" {
+			return ErrExpansionInvalid
+		}
+		parsedType, parseErr := model.ParseNodeType(string(node.NodeType))
+		if parseErr != nil {
+			return ErrExpansionInvalid
+		}
+		node.NodeType = parsedType
+		if node.NodeType == model.NodeTypeSkillSink && node.SkillName == "" {
+			return ErrExpansionInvalid
+		}
+		if node.NodeType == model.NodeTypeExpandPlanning && node.SkillName != "" && node.SkillName != "ReActPlanner" {
 			return ErrExpansionInvalid
 		}
 		if _, exists := newNodes[node.NodeID]; exists {
@@ -778,7 +834,15 @@ WHERE task_id=?`, input.Summary, planner.TaskID)
 		if pending == 0 {
 			status = "READY"
 		}
-		if err := s.insertTask(tx, node.NodeID, planner.DAGID, string(model.NodeTypeSkillSink), node.SkillName, status, pending, node.Dependencies, []string{}, node.Parameters, time.Now().UTC()); err != nil {
+		params := node.Parameters
+		if node.NodeType == model.NodeTypeExpandPlanning {
+			var intentContext map[string]any
+			if rawIntentContext.Valid && rawIntentContext.String != "" && rawIntentContext.String != "null" {
+				_ = json.Unmarshal([]byte(rawIntentContext.String), &intentContext)
+			}
+			params = injectIntentContext(params, intentContext)
+		}
+		if err := s.insertTask(tx, node.NodeID, planner.DAGID, string(node.NodeType), node.SkillName, status, pending, node.Dependencies, []string{}, params, time.Now().UTC()); err != nil {
 			return err
 		}
 	}
@@ -881,7 +945,7 @@ ON DUPLICATE KEY UPDATE raw_data_json=VALUES(raw_data_json), updated_at=VALUES(u
 		return err
 	}
 
-	_, err = tx.Exec(`UPDATE dags SET current_depth = current_depth + 1 WHERE dag_id=?`, planner.DAGID)
+	_, err = tx.Exec(`UPDATE dags SET current_depth = current_depth + 1, jit_unmapped_streak=? WHERE dag_id=?`, nextUnmappedStreak, planner.DAGID)
 	if err != nil {
 		return err
 	}

@@ -44,15 +44,18 @@ func ParseNodeType(raw string) (NodeType, error) {
 }
 
 type DAG struct {
-	DAGID          string    `json:"dag_id"`
-	SessionID      string    `json:"session_id"`
-	UserID         string    `json:"user_id"`
-	OriginalIntent string    `json:"original_intent"`
-	Status         DAGStatus `json:"status"`
-	ReplanCount    int       `json:"replan_count"`
-	CurrentDepth   int       `json:"current_depth"`
-	MaxDepth       int       `json:"max_depth"`
-	CreatedAt      time.Time `json:"created_at"`
+	DAGID             string         `json:"dag_id"`
+	SessionID         string         `json:"session_id"`
+	UserID            string         `json:"user_id"`
+	OriginalIntent    string         `json:"original_intent"`
+	IntentContext     map[string]any `json:"intent_context,omitempty"`
+	Status            DAGStatus      `json:"status"`
+	ReplanCount       int            `json:"replan_count"`
+	CurrentDepth      int            `json:"current_depth"`
+	MaxDepth          int            `json:"max_depth"`
+	JITUnmappedStreak int            `json:"jit_unmapped_streak"`
+	MaxUnmappedStreak int            `json:"max_unmapped_streak"`
+	CreatedAt         time.Time      `json:"created_at"`
 }
 
 type Task struct {

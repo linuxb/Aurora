@@ -97,7 +97,7 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 
 	var snapshot scheduler.Snapshot
 	var err error
-	snapshot, err = s.store.CreateSessionFromPlan(req.UserID, req.Intent, toSessionTaskSpecs(plan.Nodes))
+	snapshot, err = s.store.CreateSessionFromPlan(req.UserID, req.Intent, plan.IntentContext, toSessionTaskSpecs(plan.Nodes))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "create_session_failed", err.Error())
 		return
@@ -217,10 +217,16 @@ func (s *Server) completeTask(w http.ResponseWriter, r *http.Request) {
 			status = http.StatusConflict
 		case errors.Is(err, scheduler.ErrExpansionDepthExceeded):
 			status = http.StatusConflict
+		case errors.Is(err, scheduler.ErrSkillMappingExhausted):
+			status = http.StatusUnprocessableEntity
 		case errors.Is(err, scheduler.ErrExpansionNotImplemented):
 			status = http.StatusNotImplemented
 		}
-		respondError(w, status, "task_completion_failed", err.Error())
+		code := "task_completion_failed"
+		if errors.Is(err, scheduler.ErrSkillMappingExhausted) {
+			code = "missing_skill"
+		}
+		respondError(w, status, code, err.Error())
 		return
 	}
 

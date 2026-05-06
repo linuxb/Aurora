@@ -1,7 +1,7 @@
 SHELL := /bin/zsh
 GOCACHE ?= $(CURDIR)/.cache/go-build
 
-.PHONY: help run-arqo run-worker run-polaris test-arqo test-polaris test check-env infra-up infra-down infra-up-dev infra-down-dev infra-up-full infra-down-full test-smoke-ruby test-fault-ruby hardening-regression hardening-tidb
+.PHONY: help run-arqo run-worker run-polaris test-arqo test-polaris test check-env infra-up infra-down infra-up-dev infra-down-dev infra-up-full infra-down-full test-smoke-ruby test-fault-ruby test-missing-skill-ruby test-regression-ruby hardening-regression hardening-tidb
 
 help:
 	@echo "Targets:"
@@ -16,6 +16,8 @@ help:
 	@echo "  infra-down-full - stop full stack from docker-compose.yml"
 	@echo "  test-smoke-ruby - run Ruby smoke E2E for arqo session DAG"
 	@echo "  test-fault-ruby - run Ruby fault-injection checks"
+	@echo "  test-missing-skill-ruby - run Ruby regression for missing_skill guardrail"
+	@echo "  test-regression-ruby - run full Ruby API regression suite (smoke -> fault -> missing_skill)"
 	@echo "  hardening-regression - run fixed deferred hardening checks"
 	@echo "  hardening-tidb - run TiDB smoke check (requires TiDB env)"
 
@@ -68,6 +70,12 @@ test-smoke-ruby:
 
 test-fault-ruby:
 	ruby tools/testing/arqo_fault_injector.rb
+
+test-missing-skill-ruby:
+	ruby tools/testing/arqo_missing_skill_regression.rb
+
+test-regression-ruby:
+	ruby tools/testing/arqo_regression_suite.rb
 
 hardening-regression: test-arqo test-smoke-ruby test-fault-ruby
 	@echo "[hardening] baseline regression checks passed"

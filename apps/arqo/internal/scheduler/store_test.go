@@ -251,20 +251,24 @@ func TestJITExpansionRedirectsDownstreamAndReadiesLeaves(t *testing.T) {
 		Summary:  "expanded",
 		RawData:  map[string]any{"decision": "expand"},
 		ExpansionPayload: &ExpansionPayload{
-			Reasoning: "need parallel collection",
+			Reasoning:     "need parallel collection",
+			MappingStatus: ExpansionMappingMapped,
 			NewNodes: []ExpansionNode{
 				{
 					NodeID:       "dyn_collect_a",
+					NodeType:     model.NodeTypeSkillSink,
 					SkillName:    "QueryLog",
 					Dependencies: []string{planner.TaskID},
 				},
 				{
 					NodeID:       "dyn_collect_b",
+					NodeType:     model.NodeTypeSkillSink,
 					SkillName:    "QueryLog",
 					Dependencies: []string{planner.TaskID},
 				},
 				{
 					NodeID:       "dyn_summary",
+					NodeType:     model.NodeTypeSkillSink,
 					SkillName:    "LLMSummarize",
 					Dependencies: []string{"dyn_collect_a", "dyn_collect_b"},
 				},
@@ -385,10 +389,12 @@ func TestExpansionRejectedForSkillSinkNode(t *testing.T) {
 		Success:  true,
 		Summary:  "try to expand",
 		ExpansionPayload: &ExpansionPayload{
-			Reasoning: "invalid expansion",
+			Reasoning:     "invalid expansion",
+			MappingStatus: ExpansionMappingMapped,
 			NewNodes: []ExpansionNode{
 				{
 					NodeID:       "dyn_1",
+					NodeType:     model.NodeTypeSkillSink,
 					SkillName:    "QueryLog",
 					Dependencies: []string{task.TaskID},
 				},
@@ -414,7 +420,7 @@ func TestExpansionRejectedForSkillSinkNode(t *testing.T) {
 
 func TestCreateSessionFromPlanBuildsRuntimeGraph(t *testing.T) {
 	store := NewStore()
-	snapshot, err := store.CreateSessionFromPlan("u-plan", "plan-based creation", []SessionTaskSpec{
+	snapshot, err := store.CreateSessionFromPlan("u-plan", "plan-based creation", map[string]any{"macro_intent": "plan"}, []SessionTaskSpec{
 		{RefID: "query", NodeType: model.NodeTypeSkillSink, SkillName: "QueryLog"},
 		{RefID: "sum", NodeType: model.NodeTypeSkillSink, SkillName: "LLMSummarize", Dependencies: []string{"query"}},
 		{RefID: "mail", NodeType: model.NodeTypeSkillSink, SkillName: "SendEmail", Dependencies: []string{"sum"}},
@@ -436,5 +442,116 @@ func TestCreateSessionFromPlanBuildsRuntimeGraph(t *testing.T) {
 	}
 	if got, want := readyCount, 1; got != want {
 		t.Fatalf("expected exactly one ready root task, got=%d", got)
+	}
+}
+
+func TestExpansionSupportsExpandPlanningNodeAndInjectsIntentContext(t *testing.T) {
+	store := NewStore()
+	snapshot, err := store.CreateJITDemoSession("u-jit", "followup planning")
+	if err != nil {
+		t.Fatalf("create jit session failed: %v", err)
+	}
+	planner, err := store.PullReadyTask("planner-worker", time.Minute)
+	if err != nil {
+		t.Fatalf("pull planner failed: %v", err)
+	}
+	_, err = store.CompleteTask(CompleteTaskInput{
+		TaskID:   planner.TaskID,
+		WorkerID: "planner-worker",
+		Success:  true,
+		Summary:  "expanded with planner child",
+		ExpansionPayload: &ExpansionPayload{
+			Reasoning:     "needs recursive planning",
+			MappingStatus: ExpansionMappingUnmapped,
+			NewNodes: []ExpansionNode{
+				{
+					NodeID:       "dyn_plan_next",
+					NodeType:     model.NodeTypeExpandPlanning,
+					SkillName:    "ReActPlanner",
+					Dependencies: []string{planner.TaskID},
+				},
+			},
+			DownstreamWiring: DownstreamWiring{
+				RedirectFrom: planner.TaskID,
+				RedirectTo:   []string{"dyn_plan_next"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("complete expansion failed: %v", err)
+	}
+	final, err := store.GetSessionSnapshot(snapshot.Session.SessionID)
+	if err != nil {
+		t.Fatalf("snapshot failed: %v", err)
+	}
+	if got, want := final.DAG.JITUnmappedStreak, 1; got != want {
+		t.Fatalf("unexpected unmapped streak: got=%d want=%d", got, want)
+	}
+	var dyn model.Task
+	found := false
+	for _, task := range final.Tasks {
+		if task.TaskID == "dyn_plan_next" {
+			dyn = task
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("missing dyn_plan_next")
+	}
+	if dyn.NodeType != model.NodeTypeExpandPlanning {
+		t.Fatalf("unexpected node type: %s", dyn.NodeType)
+	}
+	if _, ok := dyn.Parameters["intent_context"]; !ok {
+		t.Fatalf("expected intent_context injected, got params=%v", dyn.Parameters)
+	}
+}
+
+func TestExpansionUnmappedStreakExhaustedReturnsMissingSkill(t *testing.T) {
+	store := NewStore()
+	snapshot, err := store.CreateJITDemoSession("u-jit", "missing skill case")
+	if err != nil {
+		t.Fatalf("create jit session failed: %v", err)
+	}
+	session := store.sessions[snapshot.Session.SessionID]
+	dag := store.dags[session.DAGID]
+	dag.MaxUnmappedStreak = 1
+	store.dags[session.DAGID] = dag
+
+	planner, err := store.PullReadyTask("planner-worker", time.Minute)
+	if err != nil {
+		t.Fatalf("pull planner failed: %v", err)
+	}
+	_, err = store.CompleteTask(CompleteTaskInput{
+		TaskID:   planner.TaskID,
+		WorkerID: "planner-worker",
+		Success:  true,
+		Summary:  "cannot map skill",
+		ExpansionPayload: &ExpansionPayload{
+			Reasoning:     "unknown toolchain",
+			MappingStatus: ExpansionMappingUnmapped,
+			NewNodes: []ExpansionNode{
+				{
+					NodeID:       "dyn_plan_again",
+					NodeType:     model.NodeTypeExpandPlanning,
+					SkillName:    "ReActPlanner",
+					Dependencies: []string{planner.TaskID},
+				},
+			},
+			DownstreamWiring: DownstreamWiring{
+				RedirectFrom: planner.TaskID,
+				RedirectTo:   []string{"dyn_plan_again"},
+			},
+		},
+	})
+	if err != ErrSkillMappingExhausted {
+		t.Fatalf("expected ErrSkillMappingExhausted, got=%v", err)
+	}
+	final, err := store.GetSessionSnapshot(snapshot.Session.SessionID)
+	if err != nil {
+		t.Fatalf("snapshot failed: %v", err)
+	}
+	if final.DAG.Status != model.DAGStatusReplanning {
+		t.Fatalf("unexpected dag status: %s", final.DAG.Status)
 	}
 }

@@ -74,14 +74,17 @@ func (s *Store) CreateDemoSession(userID, intent string) (Snapshot, error) {
 		CreatedAt: now,
 	}
 	dag := model.DAG{
-		DAGID:          dagID,
-		SessionID:      sessionID,
-		UserID:         userID,
-		OriginalIntent: intent,
-		Status:         model.DAGStatusRunning,
-		CurrentDepth:   1,
-		MaxDepth:       10,
-		CreatedAt:      now,
+		DAGID:             dagID,
+		SessionID:         sessionID,
+		UserID:            userID,
+		OriginalIntent:    intent,
+		IntentContext:     map[string]any{"original_intent": intent, "source": "demo"},
+		Status:            model.DAGStatusRunning,
+		CurrentDepth:      1,
+		MaxDepth:          10,
+		JITUnmappedStreak: 0,
+		MaxUnmappedStreak: 3,
+		CreatedAt:         now,
 	}
 
 	queryTaskID := fmt.Sprintf("task_%06d", s.taskCounter.Add(1))
@@ -149,14 +152,17 @@ func (s *Store) CreateJITDemoSession(userID, intent string) (Snapshot, error) {
 		CreatedAt: now,
 	}
 	dag := model.DAG{
-		DAGID:          dagID,
-		SessionID:      sessionID,
-		UserID:         userID,
-		OriginalIntent: intent,
-		Status:         model.DAGStatusRunning,
-		CurrentDepth:   1,
-		MaxDepth:       10,
-		CreatedAt:      now,
+		DAGID:             dagID,
+		SessionID:         sessionID,
+		UserID:            userID,
+		OriginalIntent:    intent,
+		IntentContext:     map[string]any{"original_intent": intent, "source": "jit_demo"},
+		Status:            model.DAGStatusRunning,
+		CurrentDepth:      1,
+		MaxDepth:          10,
+		JITUnmappedStreak: 0,
+		MaxUnmappedStreak: 3,
+		CreatedAt:         now,
 	}
 	plannerTask := &model.Task{
 		TaskID:                   plannerTaskID,
@@ -167,6 +173,7 @@ func (s *Store) CreateJITDemoSession(userID, intent string) (Snapshot, error) {
 		PendingDependenciesCount: 0,
 		Dependencies:             []string{},
 		Children:                 []string{finalTaskID},
+		Parameters:               map[string]any{"intent_context": dag.IntentContext},
 	}
 	finalTask := &model.Task{
 		TaskID:                   finalTaskID,
@@ -189,7 +196,7 @@ func (s *Store) CreateJITDemoSession(userID, intent string) (Snapshot, error) {
 	return s.snapshotLocked(sessionID), nil
 }
 
-func (s *Store) CreateSessionFromPlan(userID, intent string, tasks []SessionTaskSpec) (Snapshot, error) {
+func (s *Store) CreateSessionFromPlan(userID, intent string, intentContext map[string]any, tasks []SessionTaskSpec) (Snapshot, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -205,14 +212,17 @@ func (s *Store) CreateSessionFromPlan(userID, intent string, tasks []SessionTask
 		CreatedAt: now,
 	}
 	dag := model.DAG{
-		DAGID:          dagID,
-		SessionID:      sessionID,
-		UserID:         userID,
-		OriginalIntent: intent,
-		Status:         model.DAGStatusRunning,
-		CurrentDepth:   1,
-		MaxDepth:       10,
-		CreatedAt:      now,
+		DAGID:             dagID,
+		SessionID:         sessionID,
+		UserID:            userID,
+		OriginalIntent:    intent,
+		IntentContext:     cloneMap(intentContext),
+		Status:            model.DAGStatusRunning,
+		CurrentDepth:      1,
+		MaxDepth:          10,
+		JITUnmappedStreak: 0,
+		MaxUnmappedStreak: 3,
+		CreatedAt:         now,
 	}
 
 	refToTaskID := make(map[string]string, len(tasks))
@@ -261,6 +271,9 @@ func (s *Store) CreateSessionFromPlan(userID, intent string, tasks []SessionTask
 			Dependencies:             deps,
 			Children:                 children,
 			Parameters:               spec.Parameters,
+		}
+		if task.NodeType == model.NodeTypeExpandPlanning {
+			task.Parameters = injectIntentContext(task.Parameters, dag.IntentContext)
 		}
 		s.tasksByID[taskID] = task
 		s.tasksByDAG[dagID] = append(s.tasksByDAG[dagID], taskID)
@@ -368,12 +381,29 @@ func (s *Store) applyExpansionLocked(task *model.Task, input CompleteTaskInput) 
 	if err := s.validateExpansionLocked(task, payload); err != nil {
 		return err
 	}
+	mappingStatus := normalizeMappingStatus(payload.MappingStatus)
+	if mappingStatus == ExpansionMappingUnmapped {
+		dag.JITUnmappedStreak++
+		limit := dag.MaxUnmappedStreak
+		if limit <= 0 {
+			limit = 3
+		}
+		if dag.JITUnmappedStreak >= limit {
+			task.Status = model.TaskStatusFailed
+			task.OwnerID = ""
+			task.ExpireAt = nil
+			task.LastErrorCode = "MISSING_SKILL"
+			task.LastHumanReadableErrorMsg = "skill mapping exhausted, missing required skill"
+			dag.Status = model.DAGStatusReplanning
+			dag.ReplanCount++
+			s.dags[task.DAGID] = dag
+			return ErrSkillMappingExhausted
+		}
+	} else {
+		dag.JITUnmappedStreak = 0
+	}
 
 	originalChildren := append([]string{}, task.Children...)
-	tailSet := make(map[string]struct{}, len(payload.DownstreamWiring.RedirectTo))
-	for _, tailID := range payload.DownstreamWiring.RedirectTo {
-		tailSet[tailID] = struct{}{}
-	}
 
 	task.Status = model.TaskStatusSuccess
 	task.OwnerID = ""
@@ -397,13 +427,16 @@ func (s *Store) applyExpansionLocked(task *model.Task, input CompleteTaskInput) 
 		taskNode := &model.Task{
 			TaskID:                   node.NodeID,
 			DAGID:                    task.DAGID,
-			NodeType:                 model.NodeTypeSkillSink,
+			NodeType:                 node.NodeType,
 			SkillName:                node.SkillName,
 			Status:                   status,
 			PendingDependenciesCount: pending,
 			Dependencies:             append([]string{}, node.Dependencies...),
 			Children:                 []string{},
 			Parameters:               node.Parameters,
+		}
+		if taskNode.NodeType == model.NodeTypeExpandPlanning {
+			taskNode.Parameters = injectIntentContext(taskNode.Parameters, dag.IntentContext)
 		}
 		s.tasksByID[node.NodeID] = taskNode
 		s.tasksByDAG[task.DAGID] = append(s.tasksByDAG[task.DAGID], node.NodeID)
@@ -454,6 +487,10 @@ func (s *Store) validateExpansionLocked(task *model.Task, payload *ExpansionPayl
 	if payload == nil || len(payload.NewNodes) == 0 {
 		return ErrExpansionInvalid
 	}
+	mappingStatus := normalizeMappingStatus(payload.MappingStatus)
+	if mappingStatus != ExpansionMappingMapped && mappingStatus != ExpansionMappingUnmapped {
+		return ErrExpansionInvalid
+	}
 	if payload.DownstreamWiring.RedirectFrom != task.TaskID {
 		return ErrExpansionInvalid
 	}
@@ -464,7 +501,18 @@ func (s *Store) validateExpansionLocked(task *model.Task, payload *ExpansionPayl
 	seen := make(map[string]struct{}, len(payload.NewNodes))
 	newNodes := make(map[string]ExpansionNode, len(payload.NewNodes))
 	for _, node := range payload.NewNodes {
-		if node.NodeID == "" || node.SkillName == "" {
+		if node.NodeID == "" || node.NodeType == "" {
+			return ErrExpansionInvalid
+		}
+		parsedType, err := model.ParseNodeType(string(node.NodeType))
+		if err != nil {
+			return ErrExpansionInvalid
+		}
+		node.NodeType = parsedType
+		if node.NodeType == model.NodeTypeSkillSink && node.SkillName == "" {
+			return ErrExpansionInvalid
+		}
+		if node.NodeType == model.NodeTypeExpandPlanning && node.SkillName != "" && node.SkillName != "ReActPlanner" {
 			return ErrExpansionInvalid
 		}
 		if _, exists := s.tasksByID[node.NodeID]; exists {
@@ -532,6 +580,23 @@ func countPendingDependencies(tasks map[string]*model.Task, deps []string) int {
 		}
 	}
 	return pending
+}
+
+func cloneMap(src map[string]any) map[string]any {
+	if len(src) == 0 {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(src))
+	for k, v := range src {
+		out[k] = v
+	}
+	return out
+}
+
+func injectIntentContext(params map[string]any, intentContext map[string]any) map[string]any {
+	out := cloneMap(params)
+	out["intent_context"] = cloneMap(intentContext)
+	return out
 }
 
 func (s *Store) ExpireRunningTasks(now time.Time) []string {

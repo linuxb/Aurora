@@ -1,7 +1,7 @@
 import { AuroraSkillError } from "./types.ts";
 import type { SkillResponse } from "./types.ts";
 
-type SkillRunner = (taskID: string) => Promise<SkillResponse>;
+type SkillRunner = (taskID: string, parameters?: Record<string, unknown>) => Promise<SkillResponse>;
 
 const pause = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
@@ -43,43 +43,53 @@ const sendEmail: SkillRunner = async (taskID) => {
   };
 };
 
-const reactPlanner: SkillRunner = async (taskID) => {
+const reactPlanner: SkillRunner = async (taskID, parameters) => {
   await pause(100);
   const collectA = `${taskID}_dyn_collect_a`;
   const collectB = `${taskID}_dyn_collect_b`;
-  const summarize = `${taskID}_dyn_summary`;
+  const followupPlanner = `${taskID}_dyn_followup_planner`;
+  const intentContext = (parameters?.intent_context as Record<string, unknown> | undefined) ?? {};
+  const shouldKeepExpanding = String(intentContext?.macro_intent ?? "").includes("unknown_skill");
 
   return {
     raw_data: {
       task_id: taskID,
       planning_mode: "jit",
       decision: "expand",
+      intent_context: intentContext,
     },
-    summary: "Planner expanded the DAG with two collection tasks and one dynamic summary task.",
+    summary: shouldKeepExpanding
+      ? "Planner cannot fully map skills yet and schedules a follow-up planning node."
+      : "Planner expanded the DAG with concrete skill nodes and one follow-up planning node.",
     expansion_payload: {
+      mapping_status: shouldKeepExpanding ? "unmapped" : "mapped",
       reasoning: "The goal needs parallel evidence collection before final delivery.",
       new_nodes: [
         {
           node_id: collectA,
+          node_type: "SKILL_SINK",
           skill_name: "QueryLog",
           parameters: { source: "payment-api" },
           dependencies: [taskID],
         },
         {
           node_id: collectB,
+          node_type: "SKILL_SINK",
           skill_name: "QueryLog",
           parameters: { source: "payment-db" },
           dependencies: [taskID],
         },
         {
-          node_id: summarize,
-          skill_name: "LLMSummarize",
+          node_id: followupPlanner,
+          node_type: "EXPAND_PLANNING",
+          skill_name: "ReActPlanner",
+          parameters: { from: "reactPlanner", intent_context: intentContext },
           dependencies: [collectA, collectB],
         },
       ],
       downstream_wiring: {
         redirect_from: taskID,
-        redirect_to: [summarize],
+        redirect_to: [followupPlanner],
       },
     },
   };
@@ -92,7 +102,11 @@ export const skills: Record<string, SkillRunner> = {
   SendEmail: sendEmail,
 };
 
-export async function runSkill(skillName: string, taskID: string): Promise<SkillResponse> {
+export async function runSkill(
+  skillName: string,
+  taskID: string,
+  parameters?: Record<string, unknown>,
+): Promise<SkillResponse> {
   const skill = skills[skillName];
   if (!skill) {
     throw new AuroraSkillError(
@@ -101,5 +115,5 @@ export async function runSkill(skillName: string, taskID: string): Promise<Skill
       `Missing skill registry for ${skillName}`,
     );
   }
-  return skill(taskID);
+  return skill(taskID, parameters);
 }

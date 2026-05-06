@@ -22,11 +22,20 @@
 - `tools/testing/arqo_fault_injector.rb`
   - Scenario 1: force task failure and verify DAG moves to `REPLANNING`.
   - Scenario 2: simulate owner conflict and verify API returns `409`.
+- `tools/testing/arqo_missing_skill_regression.rb`
+  - Scenario: consecutive `mapping_status=unmapped` expansion should be blocked.
+  - Verify API returns `422` with `code=missing_skill`.
+  - Verify DAG state transitions to `REPLANNING`.
+- `tools/testing/arqo_regression_suite.rb`
+  - Serial suite entrypoint: `smoke -> fault -> missing_skill`.
+  - Auto-starts/stops `worker-ts` only for smoke phase to avoid lease ownership races in fault/missing-skill scenarios.
 
 ## Run
 ```bash
 make test-smoke-ruby
 make test-fault-ruby
+ruby tools/testing/arqo_missing_skill_regression.rb
+make test-regression-ruby
 ```
 
 Optional env:

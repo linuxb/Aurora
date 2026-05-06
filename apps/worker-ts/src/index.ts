@@ -73,7 +73,7 @@ async function runOnce(): Promise<boolean> {
   await emitTelemetry("NODE_START", task.task_id, `Start executing skill=${task.skill_name}`);
 
   try {
-    const response = await runSkill(task.skill_name, task.task_id);
+    const response = await runSkill(task.skill_name, task.task_id, task.parameters);
     await emitTelemetry("NODE_FINISH", task.task_id, response.summary);
     await completeTask(task.task_id, {
       status: response.expansion_payload ? "SUCCESS_AND_EXPAND" : "SUCCESS",

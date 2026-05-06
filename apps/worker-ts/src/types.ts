@@ -6,12 +6,14 @@ export interface SkillResponse {
 
 export interface ExpansionPayload {
   reasoning: string;
+  mapping_status: "mapped" | "unmapped";
   new_nodes: ExpansionNode[];
   downstream_wiring: DownstreamWiring;
 }
 
 export interface ExpansionNode {
   node_id: string;
+  node_type: "SKILL_SINK" | "EXPAND_PLANNING";
   skill_name: string;
   parameters?: Record<string, unknown>;
   dependencies: string[];
@@ -49,6 +51,7 @@ export type TelemetryEventType =
 export interface Task {
   task_id: string;
   dag_id: string;
+  node_type: "SKILL_SINK" | "EXPAND_PLANNING";
   skill_name: string;
   status: "PENDING" | "READY" | "RUNNING" | "SUCCESS" | "FAILED";
   pending_dependencies_count: number;
