@@ -445,6 +445,86 @@ func TestCreateSessionFromPlanBuildsRuntimeGraph(t *testing.T) {
 	}
 }
 
+func TestCreateSessionFromPlanMixedNodeTypeFixture(t *testing.T) {
+	store := NewStore()
+	intentContext := map[string]any{
+		"original_intent": "collect evidence then notify",
+		"slots": map[string]any{
+			"planning_mode": "jit",
+		},
+	}
+	snapshot, err := store.CreateSessionFromPlan("u-mixed", "collect evidence then notify", intentContext, []SessionTaskSpec{
+		{
+			RefID:     "planner",
+			NodeType:  model.NodeTypeExpandPlanning,
+			SkillName: "ReActPlanner",
+		},
+		{
+			RefID:        "final",
+			NodeType:     model.NodeTypeSkillSink,
+			SkillName:    "SendEmail",
+			Dependencies: []string{"planner"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create session from mixed plan failed: %v", err)
+	}
+	if len(snapshot.Tasks) != 2 {
+		t.Fatalf("expected 2 tasks, got=%d", len(snapshot.Tasks))
+	}
+
+	var plannerTask model.Task
+	var finalTask model.Task
+	for _, task := range snapshot.Tasks {
+		switch task.SkillName {
+		case "ReActPlanner":
+			plannerTask = task
+		case "SendEmail":
+			finalTask = task
+		}
+	}
+	if plannerTask.TaskID == "" || finalTask.TaskID == "" {
+		t.Fatalf("expected planner and final tasks, got=%v", snapshot.Tasks)
+	}
+	if plannerTask.Status != model.TaskStatusReady {
+		t.Fatalf("expected planner READY, got=%s", plannerTask.Status)
+	}
+	if finalTask.Status != model.TaskStatusPending {
+		t.Fatalf("expected final PENDING, got=%s", finalTask.Status)
+	}
+	if plannerTask.NodeType != model.NodeTypeExpandPlanning {
+		t.Fatalf("expected planner node type EXPAND_PLANNING, got=%s", plannerTask.NodeType)
+	}
+	if _, ok := plannerTask.Parameters["intent_context"]; !ok {
+		t.Fatalf("expected planner task to carry intent_context, got=%v", plannerTask.Parameters)
+	}
+
+	leasedPlanner, err := store.PullReadyTask("planner-worker", time.Minute)
+	if err != nil {
+		t.Fatalf("pull planner failed: %v", err)
+	}
+	if leasedPlanner.SkillName != "ReActPlanner" {
+		t.Fatalf("expected planner task lease first, got=%s", leasedPlanner.SkillName)
+	}
+	if _, err := store.CompleteTask(CompleteTaskInput{
+		TaskID:   leasedPlanner.TaskID,
+		WorkerID: "planner-worker",
+		Success:  true,
+		Summary:  "planner done",
+		RawData:  map[string]any{"stage": "done"},
+	}); err != nil {
+		t.Fatalf("complete planner failed: %v", err)
+	}
+
+	leasedFinal, err := store.PullReadyTask("final-worker", time.Minute)
+	if err != nil {
+		t.Fatalf("pull final failed: %v", err)
+	}
+	if leasedFinal.SkillName != "SendEmail" {
+		t.Fatalf("expected SendEmail after planner, got=%s", leasedFinal.SkillName)
+	}
+}
+
 func TestExpansionSupportsExpandPlanningNodeAndInjectsIntentContext(t *testing.T) {
 	store := NewStore()
 	snapshot, err := store.CreateJITDemoSession("u-jit", "followup planning")

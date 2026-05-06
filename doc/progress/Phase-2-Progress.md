@@ -53,10 +53,14 @@
   - request includes `intent`, `planning_mode`, `model`, `schema`
   - supports both `{ plan: {...} }` and flat plan response forms
   - added tests for unavailable endpoint and successful model plan decode
+- Added plan payload compatibility baseline test:
+  - API test now validates `plan_id/source/intent_context/nodes` presence and node required fields
+- Added deterministic mixed `node_type` fixture test:
+  - verifies `EXPAND_PLANNING -> SKILL_SINK` graph creation, intent context injection, and execution ordering
 
 ## Verification
 - `go test ./...` in `apps/arqo` passes with validator tests included.
 
 ## Pending in Phase 2
-- Add compatibility/version tests for `plan` payload fields (`plan_id/source/intent_context/nodes`).
-- Add deterministic fixture tests for multi-node mixed `node_type` plans.
+- Extend compatibility fixtures to cover backward-tolerant decoding for optional fields.
+- Add deterministic fixture set for mixed `node_type` with branching and parallel leaves.
