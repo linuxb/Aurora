@@ -355,6 +355,20 @@ func (s *Server) streamSessionEvents(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) sweepExpired(w http.ResponseWriter, r *http.Request) {
 	expired := s.store.ExpireRunningTasks(time.Now().UTC())
+	for _, taskID := range expired {
+		sessionID, ok := s.store.ResolveSessionIDByTaskID(taskID)
+		if !ok {
+			continue
+		}
+		s.publishEvent(r.Context(), events.Event{
+			SessionID: sessionID,
+			EventType: "TASK_SWEEP_EXPIRED",
+			TaskID:    taskID,
+			Message:   "task lease expired and recovery policy applied",
+			Source:    "arqo",
+			At:        time.Now().UTC(),
+		})
+	}
 	respondJSON(w, http.StatusOK, map[string]any{
 		"expired_task_ids": expired,
 		"count":            len(expired),

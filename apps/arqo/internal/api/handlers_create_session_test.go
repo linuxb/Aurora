@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -190,5 +191,52 @@ func TestSweepExpiredEndpoint(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("task not found after sweep: %s", task.TaskID)
+	}
+}
+
+func TestSweepExpiredPublishesTimelineEvent(t *testing.T) {
+	store := scheduler.NewStore()
+	broker := events.NewMemoryBroker()
+	server := NewServer(store, broker)
+	mux := http.NewServeMux()
+	server.Register(mux)
+
+	snapshot, err := store.CreateDemoSession("u-sweep-event", "sweep event test")
+	if err != nil {
+		t.Fatalf("create demo session failed: %v", err)
+	}
+	task, err := store.PullReadyTask("sweeper-worker", -1*time.Second)
+	if err != nil {
+		t.Fatalf("pull failed: %v", err)
+	}
+	if task.TaskID == "" {
+		t.Fatal("expected leased task id")
+	}
+
+	subCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch, err := broker.Subscribe(subCtx, snapshot.Session.SessionID)
+	if err != nil {
+		t.Fatalf("subscribe failed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/admin/sweep-expired", nil)
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+	if got, want := res.Code, http.StatusOK; got != want {
+		t.Fatalf("unexpected status code: got=%d want=%d body=%s", got, want, res.Body.String())
+	}
+
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case evt := <-ch:
+			if evt.EventType == "TASK_SWEEP_EXPIRED" && evt.TaskID == task.TaskID {
+				return
+			}
+		case <-timer.C:
+			t.Fatalf("timed out waiting for TASK_SWEEP_EXPIRED event on task=%s", task.TaskID)
+		}
 	}
 }

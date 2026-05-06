@@ -24,10 +24,14 @@
   - verify `retry_ready` SQL update behavior
 - Added memory scheduler policy test:
   - verify `retry_ready` transitions and DAG status preservation
+- Added sweep observability event:
+  - `POST /v1/admin/sweep-expired` now publishes `TASK_SWEEP_EXPIRED` per recovered task
+  - event includes `session_id`, `task_id`, and timeline-safe recovery message
+- Added API-level event test:
+  - verifies sweep endpoint emits `TASK_SWEEP_EXPIRED` to session event stream
 
 ## Verification
 - `go test ./...` in `apps/arqo` passes including new sweep endpoint test.
 
 ## Pending in Phase 3
 - Add fault drill script that combines worker crash + manual sweep + resume.
-- Add observable sweep events for UI/CLI timeline.
