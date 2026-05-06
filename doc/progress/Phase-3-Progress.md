@@ -34,9 +34,13 @@
   - accepts patch task specs and applies them only when DAG is in `REPLANNING`
   - scheduler injects patch tasks, restores DAG to `RUNNING`, and resumes execution path
   - publishes `DAG_REPLAN_APPLIED` event on success
+- Added crash-sweep-resume fault drill script:
+  - `tools/testing/arqo_self_heal_drill.rb`
+  - flow: worker crash simulation -> manual sweep -> replan patch -> execution resume -> DAG success assertion
+  - Makefile target: `make test-self-heal-ruby`
 
 ## Verification
 - `go test ./...` in `apps/arqo` passes including new sweep endpoint test.
 
 ## Pending in Phase 3
-- Add fault drill script that combines worker crash + manual sweep + resume.
+- Add persistent drill variant for MySQL/TiDB runtime (longer loop and stability metrics).

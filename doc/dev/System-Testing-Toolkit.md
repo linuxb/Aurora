@@ -29,12 +29,17 @@
 - `tools/testing/arqo_regression_suite.rb`
   - Serial suite entrypoint: `smoke -> fault -> missing_skill`.
   - Auto-starts/stops `worker-ts` only for smoke phase to avoid lease ownership races in fault/missing-skill scenarios.
+- `tools/testing/arqo_self_heal_drill.rb`
+  - Scenario: simulate worker crash on leased task, then execute manual sweep and apply replan patch.
+  - Verify DAG transitions: `RUNNING -> REPLANNING -> RUNNING -> SUCCESS`.
+  - Covers the full self-healing execution path.
 
 ## Run
 ```bash
 make test-smoke-ruby
 make test-fault-ruby
 ruby tools/testing/arqo_missing_skill_regression.rb
+make test-self-heal-ruby
 make test-regression-ruby
 ```
 
