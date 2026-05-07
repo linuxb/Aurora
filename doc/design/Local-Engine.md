@@ -63,7 +63,7 @@ type IGraphStore interface {
 #### **2.2.1 架构工作流**
 
 1. **下发**: Arqo (Go) 将预编译好的纯 JS/TS 代码字符串和执行参数，通过 Unix Domain Socket (UDS) 或标准输入 (STDIN) 发送给 Aegis (Zig) 进程。  
-2. **初始化**: Zig 在内存中瞬间（![][image1] 级耗时，\< 1ms）拉起一个新的 QuickJS 运行时实例 (JSRuntime & JSContext)。  
+2. **初始化**: Zig 在内存中瞬间O(1)级耗时，\< 1ms）拉起一个新的 QuickJS 运行时实例 (JSRuntime & JSContext)。  
 3. **特权注入**: Zig 按照 Arqo 声明的权限标量，向 JS 环境中按需注入原生绑定函数（Native Bindings）。  
    * *例如：如果该 Skill 只被允许访问天气 API，Zig 只会向 JS 暴露一个受限的 fetch 函数，屏蔽掉一切涉及文件系统 fs 的 API。*  
 4. **执行与监控**: Zig 触发 JS 代码执行，并开启硬件级中断监控。  
@@ -101,5 +101,3 @@ type IGraphStore interface {
 ```
 
 通过这套适配架构，Aurora 不仅保持了 TS 开发者生态的繁荣，更在没有任何外部容器依赖的情况下，在本地电脑上构建起了一座坚不可摧的“单文件”堡垒引擎。
-
-[image1]: <data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACgAAAAYCAYAAACIhL/AAAACSklEQVR4Xu2WzUtUURjGrYgglYKYBubrztyZmshoMxC4UBdSGVTUxgJt0d9QRAai1s5F2CqXCobiTv+D3NYiWriJcGXUKpRsJdTzynvhvU9n5hyaCVr4g8Nwn+f9OmeGe6ar65D/jGKxOMCaj3K5PMRaEKVSaRTJH6Mo2sR6zj5TqVSuIH6adR/oM4Xca6w3BcO8xNrJZDI9iYaTuQTtF1a/jU1oNBrH4e2xngDvjeSzngBv1/ZrCnYyKIXy+XyBPehbMgSGzbGHU3iC9Zp1nOhT5LzTzTUdEHGvsCZYT4ECP6VIvV7vZU+o1WontNG+1fF8t1lzND0tn74BBY2ZZP0AFJrTgCX2LK5GLo1pN+aYGBhygw3GVURzV63GuPIY+EvOGIgvxKhWq2fZs+A3FnMj/FbPyDO8BzaW4TwX2OR9iYnj+FTKgPjelyygwENuBO2CDnjLxjKc5wK1RrRWnDJCkgXE7EkcCq0nminaZ2OZkB44ufMadyNlhCSDozrIihXxfFX1i1ZnQnoUCoVzEoPX2O2UAfGTLxn+tisGuy7pgDfZs4QMiG/jusTgXXyZjUVPcnJ682xks9lu9cbZswQOeE9P8I+L4KAAmryVK8vqSFrT4s+sblF/mXVLyIDov9AyBuZnLfQh0usJA96BdYRjLa2aQ/+B9Q3ri66vWDscJ7Sq0xbYxEwnCuuAY6x3BBSexKBzrIeC/Nko4C/dXyN/MNBgl/VQkPs9l8udZL2jyG2CRo9Z94GcR8gdZv2f4HsfuvBdk4e0w2/j18qA6PaDUwAAAABJRU5ErkJggg==>
