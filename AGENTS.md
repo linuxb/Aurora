@@ -10,9 +10,10 @@
 - doc/progress 开发进度记录，研发时可以回顾之前开发内容。每次研发有一定进展需要补充信息到progress对应文档。
 - doc/review 架构/代码review输出报告的位置。
   - logs 常规的code/architecture review记录
-  - plan 架构设计/优化方案的review文档
 - doc/dev 开发调试指引，包括一些测试工具的使用。
 - doc/spec 开发的具体协议Spec，比如DAG生成约束，Sandbox/Skill交互协议。review阶段或方案制定阶段如果涉及协议，可以输出到该目录。
+- doc/plan 架构设计/优化方案的具体研发计划，review或者新方案架构，或者研发优先级调整需要改动对应的plan文档
+  - Phase-Plan.md 项目总体的研发计划，每次计划的调整都要记录在总体研发计划
 - 具体工程目录以及功能说明参考 README.md
 - 生成文档时需要按照类别写入特定目录。
 
