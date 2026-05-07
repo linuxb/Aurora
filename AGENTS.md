@@ -9,7 +9,10 @@
     - Aurora-Architechure.md 系统整体架构描述。进行开发计划规划以及进度回顾需要参考。架构review必须参考。
 - doc/progress 开发进度记录，研发时可以回顾之前开发内容。每次研发有一定进展需要补充信息到progress对应文档。
 - doc/review 架构/代码review输出报告的位置。
+  - logs 常规的code/architecture review记录
+  - plan 架构设计/优化方案的review文档
 - doc/dev 开发调试指引，包括一些测试工具的使用。
+- doc/spec 开发的具体协议Spec，比如DAG生成约束，Sandbox/Skill交互协议。review阶段或方案制定阶段如果涉及协议，可以输出到该目录。
 - 具体工程目录以及功能说明参考 README.md
 - 生成文档时需要按照类别写入特定目录。
 
@@ -18,6 +21,8 @@
 - 该阶段的测试可以对一些未实现的组件进行mock，或者实现最小可测试单元。
 
 - 第二阶段我们需要细化，把一些上一个阶段mock的组件逐个完善。
+
+- 第三阶段我们需要尝试本地化部署，同时支持本地和云原生服务。
 
 ## dev enviroment
 - 初期开发环境搭建尽量保证在macos m2本机环境可以运行demo，对组件的依赖可以先以来docker compose方式搭建最小可用版本。初期先保证我可以在本机环境方便开发调试。
