@@ -132,3 +132,12 @@ This file records architecture and product decisions with traceability.
 - `owner`: user + assistant
 - `source`: conversation + `doc/progress/Hardening-Cadence.md`
 - `follow_up`: Execute cadence in next weekly cycle and record first run result.
+
+### 2026-05-08T10:20:00+08:00 | Phase 4 | Memory retrieval first increment
+- `status`: decided
+- `decision`: Start Phase 4 with a practical `polaris` memory retrieval baseline (`ingest + search`) before graph extraction complexity.
+- `context`: Phase 3 core path is delivered; Phase 4 should begin with runnable, testable memory access.
+- `impact`: Establishes user-scoped memory query interface required by later GraphRAG and planner context injection.
+- `owner`: user + assistant
+- `source`: conversation + `doc/progress/Phase-4-Progress.md`
+- `follow_up`: Integrate `arqo -> polaris` retrieval path in next increment.
