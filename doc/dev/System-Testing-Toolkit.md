@@ -33,6 +33,10 @@
   - Scenario: simulate worker crash on leased task, then execute manual sweep and apply replan patch.
   - Verify DAG transitions: `RUNNING -> REPLANNING -> RUNNING -> SUCCESS`.
   - Covers the full self-healing execution path.
+- `tools/testing/arqo_self_heal_persistent_drill.rb`
+  - Scenario: run crash->lease-expiry->replan->resume loop for persistent scheduler backend (`mysql`/`tidb`).
+  - Produces stability metrics: `pass_rate`, `replan_total`, `avg_duration_seconds`, `p95_duration_seconds`, `manual_sweep_hit_count`.
+  - Fails the run when pass rate is lower than configured threshold.
 
 ## Run
 ```bash
@@ -40,6 +44,7 @@ make test-smoke-ruby
 make test-fault-ruby
 ruby tools/testing/arqo_missing_skill_regression.rb
 make test-self-heal-ruby
+make test-self-heal-persistent-ruby
 make test-regression-ruby
 ```
 
@@ -47,6 +52,9 @@ Optional env:
 - `ARQO_URL` (default `http://127.0.0.1:8080`)
 - `SMOKE_TIMEOUT_SECONDS` (default `30`)
 - `SMOKE_POLL_INTERVAL_SECONDS` (default `0.5`)
+- `SELF_HEAL_PERSIST_ITERATIONS` (default `3`)
+- `SELF_HEAL_PERSIST_WAIT_SECONDS` (default `65`)
+- `SELF_HEAL_PERSIST_PASS_RATE_THRESHOLD` (default `1.0`)
 
 ## Next suggested expansions
 - Add a chaos loop runner in Ruby:

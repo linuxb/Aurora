@@ -38,9 +38,14 @@
   - `tools/testing/arqo_self_heal_drill.rb`
   - flow: worker crash simulation -> manual sweep -> replan patch -> execution resume -> DAG success assertion
   - Makefile target: `make test-self-heal-ruby`
+- Added persistent self-heal loop drill for MySQL/TiDB runtime:
+  - `tools/testing/arqo_self_heal_persistent_drill.rb`
+  - flow: `RUNNING(crash lease)` -> `REPLANNING(lease expiry)` -> `RUNNING(replan patch)` -> `SUCCESS`
+  - loop + metrics: `pass_rate`, `replan_total`, `avg_duration_seconds`, `p95_duration_seconds`, `manual_sweep_hit_count`
+  - Makefile target: `make test-self-heal-persistent-ruby`
 
 ## Verification
 - `go test ./...` in `apps/arqo` passes including new sweep endpoint test.
 
 ## Pending in Phase 3
-- Add persistent drill variant for MySQL/TiDB runtime (longer loop and stability metrics).
+- [Deferred / Low Priority TODO] Run the persistent drill against real MySQL/TiDB deployment and archive baseline metric snapshots in progress log.
