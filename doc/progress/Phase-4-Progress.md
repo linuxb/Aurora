@@ -31,6 +31,12 @@
   - introduced `InMemoryStore` implementation behind `Arc<dyn MemoryStore>`
   - HTTP handlers now consume store interface instead of direct shared vector access
   - keeps current behavior stable while preparing for KV/graph-backed store implementations
+- Added multi-backend memory preparation in `polaris`:
+  - backend factory from env (`POLARIS_MEMORY_BACKEND`)
+  - `memory` backend (default in-memory store)
+  - `file_md` backend with markdown persistence (`POLARIS_MEMORY_FS_DIR`)
+  - markdown entry format includes `user_id/session_id/task_id` header and summary body
+  - added persistence+search test for `FileMarkdownStore`
 
 ## Verification
 - `cargo test` in `apps/polaris` should pass with new memory retrieval tests.
