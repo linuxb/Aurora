@@ -42,6 +42,11 @@
   - concurrent-write protection with internal write mutex
   - corruption-tolerant markdown reads (broken files are skipped)
   - added tests for rotation and corruption tolerance
+- Added `SearchMemoryGraph` style retrieval baseline:
+  - new endpoint: `GET /memory/graph/search?user_id=...&session_id=...&q=...&limit=...`
+  - enforces `user_id` isolation via existing scoped memory search
+  - builds lightweight co-occurrence graph (`nodes` + `edges`) from memory summaries
+  - added graph-construction unit test
 
 ## Verification
 - `cargo test` in `apps/polaris` should pass with new memory retrieval tests.
@@ -49,7 +54,6 @@
 
 ## Pending in Phase 4
 - Add graph-structured memory representation (entity/relation extraction path).
-- Add `SearchMemoryGraph` style retrieval endpoint with user-isolation guarantees.
 - Define and implement `arqo -> polaris` memory-query strategy controls:
   - query rewrite policy
   - hit-ranking/limit policy

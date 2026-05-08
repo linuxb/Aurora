@@ -23,6 +23,20 @@ struct SearchQuery {
     limit: usize,
 }
 
+#[derive(Clone, Debug)]
+struct GraphNode {
+    id: String,
+    label: String,
+    weight: usize,
+}
+
+#[derive(Clone, Debug)]
+struct GraphEdge {
+    source: String,
+    target: String,
+    weight: usize,
+}
+
 trait MemoryStore: Send + Sync {
     fn ingest(&self, entry: MemoryEntry);
     fn list_all(&self) -> Vec<MemoryEntry>;
@@ -294,6 +308,32 @@ fn handle_connection(mut stream: TcpStream, state: AppState) {
         return;
     }
 
+    if method == "GET" && path == "/memory/graph/search" {
+        let params = parse_query_params(query);
+        let search = SearchQuery {
+            user_id: params.get("user_id").cloned().unwrap_or_default(),
+            session_id: params.get("session_id").cloned().unwrap_or_default(),
+            q: params.get("q").cloned().unwrap_or_default(),
+            limit: params
+                .get("limit")
+                .and_then(|raw| raw.parse::<usize>().ok())
+                .unwrap_or(20),
+        };
+        if search.user_id.is_empty() {
+            respond_json(
+                &mut stream,
+                400,
+                r#"{"code":"invalid_argument","message":"user_id is required"}"#,
+            );
+            return;
+        }
+        let rows = state.store.search(&search);
+        let (nodes, edges) = build_memory_graph(rows);
+        let body = graph_to_json(nodes, edges);
+        respond_json(&mut stream, 200, &body);
+        return;
+    }
+
     if method == "POST" && path == "/ingest" {
         if let Some(body) = extract_body(&request)
             && let Some(entry) = parse_ingest_payload(body)
@@ -469,6 +509,97 @@ fn rows_to_json(entries: Vec<MemoryEntry>) -> String {
         rows.len(),
         rows.join(",")
     )
+}
+
+fn graph_to_json(nodes: Vec<GraphNode>, edges: Vec<GraphEdge>) -> String {
+    let node_rows = nodes
+        .into_iter()
+        .map(|n| {
+            format!(
+                "{{\"id\":\"{}\",\"label\":\"{}\",\"weight\":{}}}",
+                escape_json(&n.id),
+                escape_json(&n.label),
+                n.weight
+            )
+        })
+        .collect::<Vec<_>>();
+    let edge_rows = edges
+        .into_iter()
+        .map(|e| {
+            format!(
+                "{{\"source\":\"{}\",\"target\":\"{}\",\"weight\":{}}}",
+                escape_json(&e.source),
+                escape_json(&e.target),
+                e.weight
+            )
+        })
+        .collect::<Vec<_>>();
+    format!(
+        "{{\"node_count\":{},\"edge_count\":{},\"nodes\":[{}],\"edges\":[{}]}}",
+        node_rows.len(),
+        edge_rows.len(),
+        node_rows.join(","),
+        edge_rows.join(",")
+    )
+}
+
+fn build_memory_graph(entries: Vec<MemoryEntry>) -> (Vec<GraphNode>, Vec<GraphEdge>) {
+    let mut node_weights: HashMap<String, usize> = HashMap::new();
+    let mut edge_weights: HashMap<(String, String), usize> = HashMap::new();
+
+    for entry in entries {
+        let terms = extract_terms(&entry.summary);
+        for term in &terms {
+            *node_weights.entry(term.clone()).or_insert(0) += 1;
+        }
+        for i in 0..terms.len() {
+            for j in (i + 1)..terms.len() {
+                let a = terms[i].clone();
+                let b = terms[j].clone();
+                let (left, right) = if a <= b { (a, b) } else { (b, a) };
+                *edge_weights.entry((left, right)).or_insert(0) += 1;
+            }
+        }
+    }
+
+    let nodes = node_weights
+        .into_iter()
+        .map(|(term, weight)| GraphNode {
+            id: term.clone(),
+            label: term,
+            weight,
+        })
+        .collect::<Vec<_>>();
+
+    let edges = edge_weights
+        .into_iter()
+        .map(|((source, target), weight)| GraphEdge {
+            source,
+            target,
+            weight,
+        })
+        .collect::<Vec<_>>();
+
+    (nodes, edges)
+}
+
+fn extract_terms(summary: &str) -> Vec<String> {
+    let mut terms = Vec::new();
+    for raw in summary.split_whitespace() {
+        let normalized = raw
+            .trim_matches(|c: char| !c.is_alphanumeric())
+            .to_lowercase();
+        if normalized.len() < 4 {
+            continue;
+        }
+        if !terms.contains(&normalized) {
+            terms.push(normalized);
+        }
+        if terms.len() >= 8 {
+            break;
+        }
+    }
+    terms
 }
 
 fn sanitize_path_component(value: &str) -> String {
@@ -677,5 +808,26 @@ mod tests {
             "expected valid ingested row to survive corrupt file"
         );
         let _ = fs::remove_dir_all(test_root);
+    }
+
+    #[test]
+    fn build_memory_graph_should_create_nodes_and_edges() {
+        let entries = vec![
+            MemoryEntry {
+                user_id: "u1".to_string(),
+                session_id: "s1".to_string(),
+                task_id: "t1".to_string(),
+                summary: "payment timeout recovered".to_string(),
+            },
+            MemoryEntry {
+                user_id: "u1".to_string(),
+                session_id: "s1".to_string(),
+                task_id: "t2".to_string(),
+                summary: "payment retried successfully".to_string(),
+            },
+        ];
+        let (nodes, edges) = build_memory_graph(entries);
+        assert!(!nodes.is_empty(), "expected graph nodes");
+        assert!(!edges.is_empty(), "expected graph edges");
     }
 }
