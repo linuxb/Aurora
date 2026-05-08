@@ -141,3 +141,12 @@ This file records architecture and product decisions with traceability.
 - `owner`: user + assistant
 - `source`: conversation + `doc/progress/Phase-4-Progress.md`
 - `follow_up`: Integrate `arqo -> polaris` retrieval path in next increment.
+
+### 2026-05-09T10:50:00+08:00 | Phase 4 | Prefer mature dependencies and configurable memory query strategy
+- `status`: decided
+- `decision`: Replace custom HTTP parsing path in `polaris` with `axum/serde` and complete `arqo` memory-query controls (rewrite/rank/timeout/fallback).
+- `context`: User requested avoiding wheel reinvention and prioritizing mainstream third-party packages for stable delivery speed.
+- `impact`: Reduces parser maintenance risk, standardizes protocol handling, and makes retrieval behavior tunable by environment without code changes.
+- `owner`: user + assistant
+- `source`: conversation + `doc/progress/Phase-4-Progress.md`
+- `follow_up`: Continue Phase 4 mainline, then upgrade graph extraction quality from regex baseline.

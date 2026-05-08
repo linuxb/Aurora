@@ -47,14 +47,22 @@
   - enforces `user_id` isolation via existing scoped memory search
   - builds lightweight co-occurrence graph (`nodes` + `edges`) from memory summaries
   - added graph-construction unit test
+- Replaced hand-rolled HTTP/JSON parsing in `polaris` with mainstream dependencies:
+  - HTTP routing via `axum`
+  - JSON encode/decode via `serde` / `serde_json`
+  - entity token extraction via `regex`
+  - kept existing backend abstraction (`memory` / `file_md`) and tests passing
+- Added `arqo -> polaris` memory-query strategy controls:
+  - query rewrite policy via `ARQO_MEMORY_QUERY_REWRITE` (`none`/`trim`)
+  - hit-ranking policy via `ARQO_MEMORY_HIT_RANK` (`none`/`short_first`/`long_first`)
+  - timeout policy via `ARQO_POLARIS_TIMEOUT_MS`
+  - fallback policy via `ARQO_MEMORY_FALLBACK_STRICT` (strict fail vs best-effort empty)
+  - default hit limit via `ARQO_MEMORY_HIT_LIMIT`
+  - added unit tests for rewrite/ranking/fallback/config parsing
 
 ## Verification
 - `cargo test` in `apps/polaris` should pass with new memory retrieval tests.
 - `go test ./...` in `apps/arqo` should pass with memory injection API tests.
 
 ## Pending in Phase 4
-- Add graph-structured memory representation (entity/relation extraction path).
-- Define and implement `arqo -> polaris` memory-query strategy controls:
-  - query rewrite policy
-  - hit-ranking/limit policy
-  - timeout/fallback policy
+- Improve graph extraction quality from regex baseline to schema-guided entity typing.

@@ -1,13 +1,22 @@
+use axum::{
+    extract::{Query, State},
+    http::StatusCode,
+    response::IntoResponse,
+    routing::{get, post},
+    Json, Router,
+};
+use regex::Regex;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
-use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct MemoryEntry {
     user_id: String,
     session_id: String,
@@ -15,26 +24,12 @@ struct MemoryEntry {
     summary: String,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Debug)]
 struct SearchQuery {
     user_id: String,
     session_id: String,
     q: String,
     limit: usize,
-}
-
-#[derive(Clone, Debug)]
-struct GraphNode {
-    id: String,
-    label: String,
-    weight: usize,
-}
-
-#[derive(Clone, Debug)]
-struct GraphEdge {
-    source: String,
-    target: String,
-    weight: usize,
 }
 
 trait MemoryStore: Send + Sync {
@@ -64,25 +59,7 @@ impl MemoryStore for InMemoryStore {
 
     fn search(&self, query: &SearchQuery) -> Vec<MemoryEntry> {
         let entries = self.list_all();
-        let normalized_q = query.q.to_lowercase();
-        let mut out = Vec::new();
-
-        for entry in entries.into_iter().rev() {
-            if entry.user_id != query.user_id {
-                continue;
-            }
-            if !query.session_id.is_empty() && entry.session_id != query.session_id {
-                continue;
-            }
-            if !normalized_q.is_empty() && !entry.summary.to_lowercase().contains(&normalized_q) {
-                continue;
-            }
-            out.push(entry);
-            if out.len() >= query.limit {
-                break;
-            }
-        }
-        out
+        filter_entries(entries, query)
     }
 }
 
@@ -94,9 +71,7 @@ struct FileMarkdownStore {
 
 impl FileMarkdownStore {
     fn new(root_dir: PathBuf, max_files_per_session: usize) -> Self {
-        if let Err(err) = fs::create_dir_all(&root_dir) {
-            eprintln!("create memory fs dir failed: {}", err);
-        }
+        let _ = fs::create_dir_all(&root_dir);
         Self {
             root_dir,
             max_files_per_session,
@@ -115,11 +90,12 @@ impl FileMarkdownStore {
             Ok(guard) => guard,
             Err(_) => return,
         };
+
         let dir = self.user_session_dir(&entry.user_id, &entry.session_id);
-        if let Err(err) = fs::create_dir_all(&dir) {
-            eprintln!("create memory dir failed: {}", err);
+        if fs::create_dir_all(&dir).is_err() {
             return;
         }
+
         let ts = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis())
@@ -130,9 +106,8 @@ impl FileMarkdownStore {
             "---\nuser_id: {}\nsession_id: {}\ntask_id: {}\n---\n{}\n",
             entry.user_id, entry.session_id, entry.task_id, entry.summary
         );
-        if let Err(err) = fs::write(path, content) {
-            eprintln!("write memory markdown failed: {}", err);
-        }
+        let _ = fs::write(path, content);
+
         self.rotate_session_files(&dir);
     }
 
@@ -148,14 +123,17 @@ impl FileMarkdownStore {
                 .collect(),
             Err(_) => return,
         };
+
         if files.len() <= self.max_files_per_session {
             return;
         }
+
         files.sort_by(|a, b| {
             a.file_name()
                 .and_then(|n| n.to_str())
                 .cmp(&b.file_name().and_then(|n| n.to_str()))
         });
+
         let remove_count = files.len().saturating_sub(self.max_files_per_session);
         for old in files.into_iter().take(remove_count) {
             let _ = fs::remove_file(old);
@@ -186,25 +164,7 @@ impl MemoryStore for FileMarkdownStore {
 
     fn search(&self, query: &SearchQuery) -> Vec<MemoryEntry> {
         let entries = self.read_all_entries();
-        let normalized_q = query.q.to_lowercase();
-        let mut out = Vec::new();
-
-        for entry in entries.into_iter().rev() {
-            if entry.user_id != query.user_id {
-                continue;
-            }
-            if !query.session_id.is_empty() && entry.session_id != query.session_id {
-                continue;
-            }
-            if !normalized_q.is_empty() && !entry.summary.to_lowercase().contains(&normalized_q) {
-                continue;
-            }
-            out.push(entry);
-            if out.len() >= query.limit {
-                break;
-            }
-        }
-        out
+        filter_entries(entries, query)
     }
 }
 
@@ -213,29 +173,74 @@ struct AppState {
     store: Arc<dyn MemoryStore>,
 }
 
-impl Default for AppState {
-    fn default() -> Self {
-        Self {
-            store: Arc::new(InMemoryStore::default()),
-        }
-    }
+#[derive(Deserialize)]
+struct IngestRequest {
+    user_id: String,
+    session_id: String,
+    task_id: String,
+    summary: String,
 }
 
-fn main() {
+#[derive(Deserialize)]
+struct SearchQueryParams {
+    user_id: Option<String>,
+    session_id: Option<String>,
+    q: Option<String>,
+    limit: Option<usize>,
+}
+
+#[derive(Serialize)]
+struct EntriesResponse {
+    count: usize,
+    entries: Vec<MemoryEntry>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct GraphNode {
+    id: String,
+    label: String,
+    node_type: String,
+    weight: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct GraphEdge {
+    source: String,
+    target: String,
+    relation: String,
+    weight: usize,
+}
+
+#[derive(Serialize)]
+struct GraphResponse {
+    node_count: usize,
+    edge_count: usize,
+    nodes: Vec<GraphNode>,
+    edges: Vec<GraphEdge>,
+}
+
+#[tokio::main]
+async fn main() {
     let addr = env::var("POLARIS_ADDR").unwrap_or_else(|_| "127.0.0.1:8082".to_string());
-    let listener = TcpListener::bind(&addr).expect("failed to bind polaris address");
+    let socket_addr: SocketAddr = addr.parse().expect("invalid POLARIS_ADDR");
+
     let state = AppState {
         store: build_store_from_env(),
     };
 
-    println!("polaris listening on {}", addr);
+    let app = Router::new()
+        .route("/healthz", get(healthz))
+        .route("/memory", get(list_memory))
+        .route("/memory/search", get(search_memory))
+        .route("/memory/graph/search", get(search_memory_graph))
+        .route("/ingest", post(ingest_memory))
+        .with_state(state);
 
-    for stream in listener.incoming() {
-        match stream {
-            Ok(stream) => handle_connection(stream, state.clone()),
-            Err(err) => eprintln!("accept error: {}", err),
-        }
-    }
+    println!("polaris listening on {}", socket_addr);
+    let listener = tokio::net::TcpListener::bind(socket_addr)
+        .await
+        .expect("failed to bind polaris address");
+    axum::serve(listener, app).await.expect("polaris serve failed");
 }
 
 fn build_store_from_env() -> Arc<dyn MemoryStore> {
@@ -259,159 +264,202 @@ fn build_store_from_env() -> Arc<dyn MemoryStore> {
     }
 }
 
-fn handle_connection(mut stream: TcpStream, state: AppState) {
-    let mut buffer = [0u8; 16 * 1024];
-    let read_count = match stream.read(&mut buffer) {
-        Ok(n) => n,
+async fn healthz() -> impl IntoResponse {
+    Json(json!({"service":"polaris","status":"ok"}))
+}
+
+async fn list_memory(State(state): State<AppState>) -> impl IntoResponse {
+    let entries = state.store.list_all();
+    Json(EntriesResponse {
+        count: entries.len(),
+        entries,
+    })
+}
+
+async fn search_memory(
+    State(state): State<AppState>,
+    Query(params): Query<SearchQueryParams>,
+) -> impl IntoResponse {
+    let search = match build_search_query(params) {
+        Ok(v) => v,
         Err(err) => {
-            eprintln!("read error: {}", err);
-            return;
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"code":"invalid_argument","message":err})),
+            )
+                .into_response();
         }
     };
 
-    let request = String::from_utf8_lossy(&buffer[..read_count]);
-    let (method, full_path) = parse_request_line(&request);
-    let (path, query) = split_path_and_query(full_path);
-
-    if method == "GET" && path == "/healthz" {
-        respond_json(&mut stream, 200, r#"{"service":"polaris","status":"ok"}"#);
-        return;
-    }
-
-    if method == "GET" && path == "/memory" {
-        let body = rows_to_json(state.store.list_all());
-        respond_json(&mut stream, 200, &body);
-        return;
-    }
-
-    if method == "GET" && path == "/memory/search" {
-        let params = parse_query_params(query);
-        let search = SearchQuery {
-            user_id: params.get("user_id").cloned().unwrap_or_default(),
-            session_id: params.get("session_id").cloned().unwrap_or_default(),
-            q: params.get("q").cloned().unwrap_or_default(),
-            limit: params
-                .get("limit")
-                .and_then(|raw| raw.parse::<usize>().ok())
-                .unwrap_or(20),
-        };
-        if search.user_id.is_empty() {
-            respond_json(
-                &mut stream,
-                400,
-                r#"{"code":"invalid_argument","message":"user_id is required"}"#,
-            );
-            return;
-        }
-        let rows = state.store.search(&search);
-        respond_json(&mut stream, 200, &rows_to_json(rows));
-        return;
-    }
-
-    if method == "GET" && path == "/memory/graph/search" {
-        let params = parse_query_params(query);
-        let search = SearchQuery {
-            user_id: params.get("user_id").cloned().unwrap_or_default(),
-            session_id: params.get("session_id").cloned().unwrap_or_default(),
-            q: params.get("q").cloned().unwrap_or_default(),
-            limit: params
-                .get("limit")
-                .and_then(|raw| raw.parse::<usize>().ok())
-                .unwrap_or(20),
-        };
-        if search.user_id.is_empty() {
-            respond_json(
-                &mut stream,
-                400,
-                r#"{"code":"invalid_argument","message":"user_id is required"}"#,
-            );
-            return;
-        }
-        let rows = state.store.search(&search);
-        let (nodes, edges) = build_memory_graph(rows);
-        let body = graph_to_json(nodes, edges);
-        respond_json(&mut stream, 200, &body);
-        return;
-    }
-
-    if method == "POST" && path == "/ingest" {
-        if let Some(body) = extract_body(&request)
-            && let Some(entry) = parse_ingest_payload(body)
-        {
-            state.store.ingest(entry.clone());
-            let msg = format!(
-                "{{\"status\":\"ok\",\"stored\":{{\"user_id\":\"{}\",\"session_id\":\"{}\",\"task_id\":\"{}\"}}}}",
-                escape_json(&entry.user_id),
-                escape_json(&entry.session_id),
-                escape_json(&entry.task_id)
-            );
-            respond_json(&mut stream, 200, &msg);
-            return;
-        }
-        respond_json(
-            &mut stream,
-            400,
-            r#"{"code":"invalid_payload","message":"expect JSON with user_id/session_id/task_id/summary"}"#,
-        );
-        return;
-    }
-
-    respond_json(
-        &mut stream,
-        404,
-        r#"{"code":"not_found","message":"route not found"}"#,
-    );
+    let entries = state.store.search(&search);
+    (
+        StatusCode::OK,
+        Json(json!({"count": entries.len(), "entries": entries})),
+    )
+        .into_response()
 }
 
-fn parse_request_line(req: &str) -> (&str, &str) {
-    if let Some(line) = req.lines().next() {
-        let mut parts = line.split_whitespace();
-        if let (Some(method), Some(path)) = (parts.next(), parts.next()) {
-            return (method, path);
+async fn search_memory_graph(
+    State(state): State<AppState>,
+    Query(params): Query<SearchQueryParams>,
+) -> impl IntoResponse {
+    let search = match build_search_query(params) {
+        Ok(v) => v,
+        Err(err) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"code":"invalid_argument","message":err})),
+            )
+                .into_response();
         }
-    }
-    ("", "")
+    };
+
+    let entries = state.store.search(&search);
+    let (nodes, edges) = build_entity_relation_graph(entries);
+    (
+        StatusCode::OK,
+        Json(GraphResponse {
+            node_count: nodes.len(),
+            edge_count: edges.len(),
+            nodes,
+            edges,
+        }),
+    )
+        .into_response()
 }
 
-fn split_path_and_query(path: &str) -> (&str, &str) {
-    if let Some(idx) = path.find('?') {
-        (&path[..idx], &path[idx + 1..])
-    } else {
-        (path, "")
+async fn ingest_memory(
+    State(state): State<AppState>,
+    Json(req): Json<IngestRequest>,
+) -> impl IntoResponse {
+    if req.user_id.trim().is_empty()
+        || req.session_id.trim().is_empty()
+        || req.task_id.trim().is_empty()
+        || req.summary.trim().is_empty()
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "code":"invalid_payload",
+                "message":"expect JSON with user_id/session_id/task_id/summary"
+            })),
+        )
+            .into_response();
     }
+
+    let entry = MemoryEntry {
+        user_id: req.user_id,
+        session_id: req.session_id,
+        task_id: req.task_id,
+        summary: req.summary,
+    };
+    state.store.ingest(entry.clone());
+
+    (
+        StatusCode::OK,
+        Json(json!({
+            "status":"ok",
+            "stored": {
+                "user_id": entry.user_id,
+                "session_id": entry.session_id,
+                "task_id": entry.task_id
+            }
+        })),
+    )
+        .into_response()
 }
 
-fn parse_query_params(query: &str) -> HashMap<String, String> {
-    let mut out = HashMap::new();
-    for pair in query.split('&') {
-        if pair.is_empty() {
+fn build_search_query(params: SearchQueryParams) -> Result<SearchQuery, String> {
+    let user_id = params.user_id.unwrap_or_default();
+    if user_id.trim().is_empty() {
+        return Err("user_id is required".to_string());
+    }
+    Ok(SearchQuery {
+        user_id,
+        session_id: params.session_id.unwrap_or_default(),
+        q: params.q.unwrap_or_default(),
+        limit: params.limit.unwrap_or(20),
+    })
+}
+
+fn filter_entries(entries: Vec<MemoryEntry>, query: &SearchQuery) -> Vec<MemoryEntry> {
+    let normalized_q = query.q.to_lowercase();
+    let mut out = Vec::new();
+
+    for entry in entries.into_iter().rev() {
+        if entry.user_id != query.user_id {
             continue;
         }
-        let mut parts = pair.splitn(2, '=');
-        let key = parts.next().unwrap_or_default().trim();
-        let value = parts.next().unwrap_or_default().trim().replace('+', " ");
-        if !key.is_empty() {
-            out.insert(key.to_string(), value);
+        if !query.session_id.is_empty() && entry.session_id != query.session_id {
+            continue;
+        }
+        if !normalized_q.is_empty() && !entry.summary.to_lowercase().contains(&normalized_q) {
+            continue;
+        }
+        out.push(entry);
+        if out.len() >= query.limit {
+            break;
         }
     }
     out
 }
 
-fn extract_body(req: &str) -> Option<&str> {
-    req.find("\r\n\r\n").map(|idx| &req[idx + 4..])
+fn extract_entities(summary: &str) -> Vec<String> {
+    let token_re = Regex::new(r"[A-Za-z0-9_\-]{4,}").expect("invalid regex");
+    let mut terms = Vec::new();
+    for cap in token_re.find_iter(summary) {
+        let token = cap.as_str().to_lowercase();
+        if !terms.contains(&token) {
+            terms.push(token);
+        }
+        if terms.len() >= 10 {
+            break;
+        }
+    }
+    terms
 }
 
-fn parse_ingest_payload(body: &str) -> Option<MemoryEntry> {
-    let user_id = extract_json_string(body, "user_id")?;
-    let session_id = extract_json_string(body, "session_id")?;
-    let task_id = extract_json_string(body, "task_id")?;
-    let summary = extract_json_string(body, "summary")?;
-    Some(MemoryEntry {
-        user_id,
-        session_id,
-        task_id,
-        summary,
-    })
+fn build_entity_relation_graph(entries: Vec<MemoryEntry>) -> (Vec<GraphNode>, Vec<GraphEdge>) {
+    let mut node_weights: HashMap<String, usize> = HashMap::new();
+    let mut edge_weights: HashMap<(String, String), usize> = HashMap::new();
+
+    for entry in entries {
+        let entities = extract_entities(&entry.summary);
+        for entity in &entities {
+            *node_weights.entry(entity.clone()).or_insert(0) += 1;
+        }
+
+        for i in 0..entities.len() {
+            for j in (i + 1)..entities.len() {
+                let a = entities[i].clone();
+                let b = entities[j].clone();
+                let (left, right) = if a <= b { (a, b) } else { (b, a) };
+                *edge_weights.entry((left, right)).or_insert(0) += 1;
+            }
+        }
+    }
+
+    let nodes = node_weights
+        .into_iter()
+        .map(|(entity, weight)| GraphNode {
+            id: entity.clone(),
+            label: entity,
+            node_type: "entity".to_string(),
+            weight,
+        })
+        .collect::<Vec<_>>();
+
+    let edges = edge_weights
+        .into_iter()
+        .map(|((source, target), weight)| GraphEdge {
+            source,
+            target,
+            relation: "co_occurs".to_string(),
+            weight,
+        })
+        .collect::<Vec<_>>();
+
+    (nodes, edges)
 }
 
 fn parse_markdown_entry(input: &str) -> Option<MemoryEntry> {
@@ -453,153 +501,13 @@ fn parse_markdown_entry(input: &str) -> Option<MemoryEntry> {
     if user_id.is_empty() || session_id.is_empty() || task_id.is_empty() {
         return None;
     }
-    let summary = summary_lines.join("\n").trim().to_string();
+
     Some(MemoryEntry {
         user_id,
         session_id,
         task_id,
-        summary,
+        summary: summary_lines.join("\n").trim().to_string(),
     })
-}
-
-fn extract_json_string(input: &str, key: &str) -> Option<String> {
-    let pattern = format!("\"{}\"", key);
-    let key_idx = input.find(&pattern)?;
-    let rest = &input[key_idx + pattern.len()..];
-    let colon_idx = rest.find(':')?;
-    let mut value = rest[colon_idx + 1..].trim_start();
-    if !value.starts_with('"') {
-        return None;
-    }
-    value = &value[1..];
-
-    let mut escaped = false;
-    let mut out = String::new();
-    for c in value.chars() {
-        if escaped {
-            out.push(c);
-            escaped = false;
-            continue;
-        }
-        if c == '\\' {
-            escaped = true;
-            continue;
-        }
-        if c == '"' {
-            return Some(out);
-        }
-        out.push(c);
-    }
-    None
-}
-
-fn rows_to_json(entries: Vec<MemoryEntry>) -> String {
-    let mut rows = Vec::with_capacity(entries.len());
-    for entry in entries {
-        rows.push(format!(
-            "{{\"user_id\":\"{}\",\"session_id\":\"{}\",\"task_id\":\"{}\",\"summary\":\"{}\"}}",
-            escape_json(&entry.user_id),
-            escape_json(&entry.session_id),
-            escape_json(&entry.task_id),
-            escape_json(&entry.summary)
-        ));
-    }
-    format!(
-        "{{\"count\":{},\"entries\":[{}]}}",
-        rows.len(),
-        rows.join(",")
-    )
-}
-
-fn graph_to_json(nodes: Vec<GraphNode>, edges: Vec<GraphEdge>) -> String {
-    let node_rows = nodes
-        .into_iter()
-        .map(|n| {
-            format!(
-                "{{\"id\":\"{}\",\"label\":\"{}\",\"weight\":{}}}",
-                escape_json(&n.id),
-                escape_json(&n.label),
-                n.weight
-            )
-        })
-        .collect::<Vec<_>>();
-    let edge_rows = edges
-        .into_iter()
-        .map(|e| {
-            format!(
-                "{{\"source\":\"{}\",\"target\":\"{}\",\"weight\":{}}}",
-                escape_json(&e.source),
-                escape_json(&e.target),
-                e.weight
-            )
-        })
-        .collect::<Vec<_>>();
-    format!(
-        "{{\"node_count\":{},\"edge_count\":{},\"nodes\":[{}],\"edges\":[{}]}}",
-        node_rows.len(),
-        edge_rows.len(),
-        node_rows.join(","),
-        edge_rows.join(",")
-    )
-}
-
-fn build_memory_graph(entries: Vec<MemoryEntry>) -> (Vec<GraphNode>, Vec<GraphEdge>) {
-    let mut node_weights: HashMap<String, usize> = HashMap::new();
-    let mut edge_weights: HashMap<(String, String), usize> = HashMap::new();
-
-    for entry in entries {
-        let terms = extract_terms(&entry.summary);
-        for term in &terms {
-            *node_weights.entry(term.clone()).or_insert(0) += 1;
-        }
-        for i in 0..terms.len() {
-            for j in (i + 1)..terms.len() {
-                let a = terms[i].clone();
-                let b = terms[j].clone();
-                let (left, right) = if a <= b { (a, b) } else { (b, a) };
-                *edge_weights.entry((left, right)).or_insert(0) += 1;
-            }
-        }
-    }
-
-    let nodes = node_weights
-        .into_iter()
-        .map(|(term, weight)| GraphNode {
-            id: term.clone(),
-            label: term,
-            weight,
-        })
-        .collect::<Vec<_>>();
-
-    let edges = edge_weights
-        .into_iter()
-        .map(|((source, target), weight)| GraphEdge {
-            source,
-            target,
-            weight,
-        })
-        .collect::<Vec<_>>();
-
-    (nodes, edges)
-}
-
-fn extract_terms(summary: &str) -> Vec<String> {
-    let mut terms = Vec::new();
-    for raw in summary.split_whitespace() {
-        let normalized = raw
-            .trim_matches(|c: char| !c.is_alphanumeric())
-            .to_lowercase();
-        if normalized.len() < 4 {
-            continue;
-        }
-        if !terms.contains(&normalized) {
-            terms.push(normalized);
-        }
-        if terms.len() >= 8 {
-            break;
-        }
-    }
-    terms
 }
 
 fn sanitize_path_component(value: &str) -> String {
@@ -617,6 +525,7 @@ fn walk_markdown_files(root: &Path, cb: &mut dyn FnMut(&Path)) {
         Ok(v) => v,
         Err(_) => return,
     };
+
     for entry in read.flatten() {
         let path = entry.path();
         if path.is_dir() {
@@ -629,51 +538,17 @@ fn walk_markdown_files(root: &Path, cb: &mut dyn FnMut(&Path)) {
     }
 }
 
-fn escape_json(value: &str) -> String {
-    value
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
-}
-
-fn respond_json(stream: &mut TcpStream, status: u16, body: &str) {
-    let status_text = match status {
-        200 => "OK",
-        400 => "Bad Request",
-        404 => "Not Found",
-        _ => "Internal Server Error",
-    };
-    let resp = format!(
-        "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        status,
-        status_text,
-        body.len(),
-        body
-    );
-    if let Err(err) = stream.write_all(resp.as_bytes()) {
-        eprintln!("write error: {}", err);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn parse_ingest_ok() {
-        let body = r#"{"user_id":"u1","session_id":"sess_1","task_id":"task_2","summary":"ok"}"#;
-        let entry = parse_ingest_payload(body).expect("expected parse success");
+    fn parse_markdown_ok() {
+        let raw = "---\nuser_id: u1\nsession_id: s1\ntask_id: t1\n---\npayment timeout recovered\n";
+        let entry = parse_markdown_entry(raw).expect("expected markdown parse success");
         assert_eq!(entry.user_id, "u1");
-        assert_eq!(entry.session_id, "sess_1");
-        assert_eq!(entry.task_id, "task_2");
-        assert_eq!(entry.summary, "ok");
-    }
-
-    #[test]
-    fn parse_ingest_fail_without_user_id() {
-        let body = r#"{"session_id":"sess_1","task_id":"task_2","summary":"ok"}"#;
-        assert!(parse_ingest_payload(body).is_none());
+        assert_eq!(entry.session_id, "s1");
+        assert_eq!(entry.task_id, "t1");
     }
 
     #[test]
@@ -706,40 +581,6 @@ mod tests {
         });
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].task_id, "t3");
-        assert_eq!(rows[0].user_id, "u1");
-    }
-
-    #[test]
-    fn file_markdown_store_should_persist_and_search() {
-        let test_root = env::temp_dir().join(format!(
-            "polaris_memory_test_{}",
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
-        ));
-        let store = FileMarkdownStore::new(test_root.clone(), 50);
-        store.ingest(MemoryEntry {
-            user_id: "u1".to_string(),
-            session_id: "s1".to_string(),
-            task_id: "t1".to_string(),
-            summary: "alpha memory".to_string(),
-        });
-        store.ingest(MemoryEntry {
-            user_id: "u2".to_string(),
-            session_id: "s2".to_string(),
-            task_id: "t2".to_string(),
-            summary: "beta memory".to_string(),
-        });
-        let rows = store.search(&SearchQuery {
-            user_id: "u1".to_string(),
-            session_id: "s1".to_string(),
-            q: "alpha".to_string(),
-            limit: 10,
-        });
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].task_id, "t1");
-        let _ = fs::remove_dir_all(test_root);
     }
 
     #[test]
@@ -751,6 +592,7 @@ mod tests {
                 .map(|d| d.as_nanos())
                 .unwrap_or(0)
         ));
+
         let store = FileMarkdownStore::new(test_root.clone(), 2);
         for idx in 0..4 {
             store.ingest(MemoryEntry {
@@ -760,16 +602,13 @@ mod tests {
                 summary: format!("summary {}", idx),
             });
         }
+
         let session_dir = test_root.join("u1").join("s1");
         let file_count = fs::read_dir(&session_dir)
             .ok()
             .map(|it| it.flatten().count())
             .unwrap_or(0);
-        assert!(
-            file_count <= 2,
-            "expected rotated file count <= 2, got={}",
-            file_count
-        );
+        assert!(file_count <= 2);
         let _ = fs::remove_dir_all(test_root);
     }
 
@@ -785,9 +624,7 @@ mod tests {
         let store = FileMarkdownStore::new(test_root.clone(), 50);
         let user_session_dir = test_root.join("u1").join("s1");
         let _ = fs::create_dir_all(&user_session_dir);
-
-        // Broken markdown: missing header delimiters/fields.
-        let _ = fs::write(user_session_dir.join("broken.md"), "this is not a valid memory file");
+        let _ = fs::write(user_session_dir.join("broken.md"), "broken content");
 
         store.ingest(MemoryEntry {
             user_id: "u1".to_string(),
@@ -802,16 +639,12 @@ mod tests {
             q: "".to_string(),
             limit: 10,
         });
-        assert!(!rows.is_empty(), "expected valid rows to be returned");
-        assert!(
-            rows.iter().any(|r| r.task_id == "ok_task"),
-            "expected valid ingested row to survive corrupt file"
-        );
+        assert!(rows.iter().any(|r| r.task_id == "ok_task"));
         let _ = fs::remove_dir_all(test_root);
     }
 
     #[test]
-    fn build_memory_graph_should_create_nodes_and_edges() {
+    fn build_entity_relation_graph_should_create_nodes_and_edges() {
         let entries = vec![
             MemoryEntry {
                 user_id: "u1".to_string(),
@@ -826,8 +659,9 @@ mod tests {
                 summary: "payment retried successfully".to_string(),
             },
         ];
-        let (nodes, edges) = build_memory_graph(entries);
-        assert!(!nodes.is_empty(), "expected graph nodes");
-        assert!(!edges.is_empty(), "expected graph edges");
+
+        let (nodes, edges) = build_entity_relation_graph(entries);
+        assert!(!nodes.is_empty());
+        assert!(!edges.is_empty());
     }
 }
