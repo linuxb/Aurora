@@ -26,6 +26,11 @@
     - `memory_hit_count`
   - integration is best-effort and non-blocking for session creation
 - Added API test coverage for memory context injection in create-session response
+- Refactored `polaris` memory backend into explicit store abstraction:
+  - introduced `MemoryStore` trait (`ingest/list_all/search`)
+  - introduced `InMemoryStore` implementation behind `Arc<dyn MemoryStore>`
+  - HTTP handlers now consume store interface instead of direct shared vector access
+  - keeps current behavior stable while preparing for KV/graph-backed store implementations
 
 ## Verification
 - `cargo test` in `apps/polaris` should pass with new memory retrieval tests.

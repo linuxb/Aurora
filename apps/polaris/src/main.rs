@@ -13,16 +13,73 @@ struct MemoryEntry {
 }
 
 #[derive(Clone, Default)]
-struct AppState {
-    entries: Arc<Mutex<Vec<MemoryEntry>>>,
-}
-
-#[derive(Default)]
 struct SearchQuery {
     user_id: String,
     session_id: String,
     q: String,
     limit: usize,
+}
+
+trait MemoryStore: Send + Sync {
+    fn ingest(&self, entry: MemoryEntry);
+    fn list_all(&self) -> Vec<MemoryEntry>;
+    fn search(&self, query: &SearchQuery) -> Vec<MemoryEntry>;
+}
+
+#[derive(Default)]
+struct InMemoryStore {
+    entries: Mutex<Vec<MemoryEntry>>,
+}
+
+impl MemoryStore for InMemoryStore {
+    fn ingest(&self, entry: MemoryEntry) {
+        if let Ok(mut entries) = self.entries.lock() {
+            entries.push(entry);
+        }
+    }
+
+    fn list_all(&self) -> Vec<MemoryEntry> {
+        self.entries
+            .lock()
+            .map(|guard| guard.clone())
+            .unwrap_or_default()
+    }
+
+    fn search(&self, query: &SearchQuery) -> Vec<MemoryEntry> {
+        let entries = self.list_all();
+        let normalized_q = query.q.to_lowercase();
+        let mut out = Vec::new();
+
+        for entry in entries.into_iter().rev() {
+            if entry.user_id != query.user_id {
+                continue;
+            }
+            if !query.session_id.is_empty() && entry.session_id != query.session_id {
+                continue;
+            }
+            if !normalized_q.is_empty() && !entry.summary.to_lowercase().contains(&normalized_q) {
+                continue;
+            }
+            out.push(entry);
+            if out.len() >= query.limit {
+                break;
+            }
+        }
+        out
+    }
+}
+
+#[derive(Clone)]
+struct AppState {
+    store: Arc<dyn MemoryStore>,
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self {
+            store: Arc::new(InMemoryStore::default()),
+        }
+    }
 }
 
 fn main() {
@@ -60,7 +117,7 @@ fn handle_connection(mut stream: TcpStream, state: AppState) {
     }
 
     if method == "GET" && path == "/memory" {
-        let body = dump_memory_json(&state);
+        let body = rows_to_json(state.store.list_all());
         respond_json(&mut stream, 200, &body);
         return;
     }
@@ -84,7 +141,7 @@ fn handle_connection(mut stream: TcpStream, state: AppState) {
             );
             return;
         }
-        let rows = search_entries(&state, &search);
+        let rows = state.store.search(&search);
         respond_json(&mut stream, 200, &rows_to_json(rows));
         return;
     }
@@ -92,9 +149,7 @@ fn handle_connection(mut stream: TcpStream, state: AppState) {
     if method == "POST" && path == "/ingest" {
         if let Some(body) = extract_body(&request) {
             if let Some(entry) = parse_ingest_payload(body) {
-                if let Ok(mut entries) = state.entries.lock() {
-                    entries.push(entry.clone());
-                }
+                state.store.ingest(entry.clone());
                 let msg = format!(
                     "{{\"status\":\"ok\",\"stored\":{{\"user_id\":\"{}\",\"session_id\":\"{}\",\"task_id\":\"{}\"}}}}",
                     escape_json(&entry.user_id),
@@ -163,7 +218,6 @@ fn parse_ingest_payload(body: &str) -> Option<MemoryEntry> {
     let session_id = extract_json_string(body, "session_id")?;
     let task_id = extract_json_string(body, "task_id")?;
     let summary = extract_json_string(body, "summary")?;
-
     Some(MemoryEntry {
         user_id,
         session_id,
@@ -178,7 +232,6 @@ fn extract_json_string(input: &str, key: &str) -> Option<String> {
     let rest = &input[key_idx + pattern.len()..];
     let colon_idx = rest.find(':')?;
     let mut value = rest[colon_idx + 1..].trim_start();
-
     if !value.starts_with('"') {
         return None;
     }
@@ -202,42 +255,6 @@ fn extract_json_string(input: &str, key: &str) -> Option<String> {
         out.push(c);
     }
     None
-}
-
-fn search_entries(state: &AppState, query: &SearchQuery) -> Vec<MemoryEntry> {
-    let entries = state
-        .entries
-        .lock()
-        .map(|guard| guard.clone())
-        .unwrap_or_default();
-
-    let normalized_q = query.q.to_lowercase();
-    let mut out = Vec::new();
-    for entry in entries.into_iter().rev() {
-        if entry.user_id != query.user_id {
-            continue;
-        }
-        if !query.session_id.is_empty() && entry.session_id != query.session_id {
-            continue;
-        }
-        if !normalized_q.is_empty() && !entry.summary.to_lowercase().contains(&normalized_q) {
-            continue;
-        }
-        out.push(entry);
-        if out.len() >= query.limit {
-            break;
-        }
-    }
-    out
-}
-
-fn dump_memory_json(state: &AppState) -> String {
-    let entries = state
-        .entries
-        .lock()
-        .map(|guard| guard.clone())
-        .unwrap_or_default();
-    rows_to_json(entries)
 }
 
 fn rows_to_json(entries: Vec<MemoryEntry>) -> String {
@@ -306,37 +323,33 @@ mod tests {
     }
 
     #[test]
-    fn search_entries_should_enforce_user_scope_and_limit() {
-        let state = AppState::default();
-        if let Ok(mut guard) = state.entries.lock() {
-            guard.push(MemoryEntry {
-                user_id: "u1".to_string(),
-                session_id: "s1".to_string(),
-                task_id: "t1".to_string(),
-                summary: "payment failed".to_string(),
-            });
-            guard.push(MemoryEntry {
-                user_id: "u2".to_string(),
-                session_id: "s2".to_string(),
-                task_id: "t2".to_string(),
-                summary: "other user summary".to_string(),
-            });
-            guard.push(MemoryEntry {
-                user_id: "u1".to_string(),
-                session_id: "s1".to_string(),
-                task_id: "t3".to_string(),
-                summary: "payment recovered".to_string(),
-            });
-        }
-        let rows = search_entries(
-            &state,
-            &SearchQuery {
-                user_id: "u1".to_string(),
-                session_id: "s1".to_string(),
-                q: "payment".to_string(),
-                limit: 1,
-            },
-        );
+    fn in_memory_store_should_enforce_user_scope_and_limit() {
+        let store = InMemoryStore::default();
+        store.ingest(MemoryEntry {
+            user_id: "u1".to_string(),
+            session_id: "s1".to_string(),
+            task_id: "t1".to_string(),
+            summary: "payment failed".to_string(),
+        });
+        store.ingest(MemoryEntry {
+            user_id: "u2".to_string(),
+            session_id: "s2".to_string(),
+            task_id: "t2".to_string(),
+            summary: "other user summary".to_string(),
+        });
+        store.ingest(MemoryEntry {
+            user_id: "u1".to_string(),
+            session_id: "s1".to_string(),
+            task_id: "t3".to_string(),
+            summary: "payment recovered".to_string(),
+        });
+
+        let rows = store.search(&SearchQuery {
+            user_id: "u1".to_string(),
+            session_id: "s1".to_string(),
+            q: "payment".to_string(),
+            limit: 1,
+        });
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].task_id, "t3");
         assert_eq!(rows[0].user_id, "u1");
