@@ -37,12 +37,20 @@
   - `file_md` backend with markdown persistence (`POLARIS_MEMORY_FS_DIR`)
   - markdown entry format includes `user_id/session_id/task_id` header and summary body
   - added persistence+search test for `FileMarkdownStore`
+- Added `file_md` backend quality gates:
+  - retention/rotation by session (`POLARIS_MEMORY_FS_MAX_FILES_PER_SESSION`)
+  - concurrent-write protection with internal write mutex
+  - corruption-tolerant markdown reads (broken files are skipped)
+  - added tests for rotation and corruption tolerance
 
 ## Verification
 - `cargo test` in `apps/polaris` should pass with new memory retrieval tests.
 - `go test ./...` in `apps/arqo` should pass with memory injection API tests.
 
 ## Pending in Phase 4
-- Add `arqo -> polaris` retrieval call path for planner context injection.
-- Add persistent memory backend abstraction (current in-memory vector is volatile).
 - Add graph-structured memory representation (entity/relation extraction path).
+- Add `SearchMemoryGraph` style retrieval endpoint with user-isolation guarantees.
+- Define and implement `arqo -> polaris` memory-query strategy controls:
+  - query rewrite policy
+  - hit-ranking/limit policy
+  - timeout/fallback policy

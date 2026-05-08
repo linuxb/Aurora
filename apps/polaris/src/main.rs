@@ -74,14 +74,20 @@ impl MemoryStore for InMemoryStore {
 
 struct FileMarkdownStore {
     root_dir: PathBuf,
+    max_files_per_session: usize,
+    write_guard: Mutex<()>,
 }
 
 impl FileMarkdownStore {
-    fn new(root_dir: PathBuf) -> Self {
+    fn new(root_dir: PathBuf, max_files_per_session: usize) -> Self {
         if let Err(err) = fs::create_dir_all(&root_dir) {
             eprintln!("create memory fs dir failed: {}", err);
         }
-        Self { root_dir }
+        Self {
+            root_dir,
+            max_files_per_session,
+            write_guard: Mutex::new(()),
+        }
     }
 
     fn user_session_dir(&self, user_id: &str, session_id: &str) -> PathBuf {
@@ -91,6 +97,10 @@ impl FileMarkdownStore {
     }
 
     fn write_entry(&self, entry: &MemoryEntry) {
+        let _guard = match self.write_guard.lock() {
+            Ok(guard) => guard,
+            Err(_) => return,
+        };
         let dir = self.user_session_dir(&entry.user_id, &entry.session_id);
         if let Err(err) = fs::create_dir_all(&dir) {
             eprintln!("create memory dir failed: {}", err);
@@ -108,6 +118,33 @@ impl FileMarkdownStore {
         );
         if let Err(err) = fs::write(path, content) {
             eprintln!("write memory markdown failed: {}", err);
+        }
+        self.rotate_session_files(&dir);
+    }
+
+    fn rotate_session_files(&self, session_dir: &Path) {
+        if self.max_files_per_session == 0 {
+            return;
+        }
+        let mut files: Vec<PathBuf> = match fs::read_dir(session_dir) {
+            Ok(read_dir) => read_dir
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.extension().and_then(|v| v.to_str()) == Some("md"))
+                .collect(),
+            Err(_) => return,
+        };
+        if files.len() <= self.max_files_per_session {
+            return;
+        }
+        files.sort_by(|a, b| {
+            a.file_name()
+                .and_then(|n| n.to_str())
+                .cmp(&b.file_name().and_then(|n| n.to_str()))
+        });
+        let remove_count = files.len().saturating_sub(self.max_files_per_session);
+        for old in files.into_iter().take(remove_count) {
+            let _ = fs::remove_file(old);
         }
     }
 
@@ -195,7 +232,14 @@ fn build_store_from_env() -> Arc<dyn MemoryStore> {
         "file_md" => {
             let root = env::var("POLARIS_MEMORY_FS_DIR")
                 .unwrap_or_else(|_| "/tmp/polaris-memory".to_string());
-            Arc::new(FileMarkdownStore::new(PathBuf::from(root)))
+            let max_files_per_session = env::var("POLARIS_MEMORY_FS_MAX_FILES_PER_SESSION")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(200);
+            Arc::new(FileMarkdownStore::new(
+                PathBuf::from(root),
+                max_files_per_session,
+            ))
         }
         _ => Arc::new(InMemoryStore::default()),
     }
@@ -543,7 +587,7 @@ mod tests {
                 .map(|d| d.as_nanos())
                 .unwrap_or(0)
         ));
-        let store = FileMarkdownStore::new(test_root.clone());
+        let store = FileMarkdownStore::new(test_root.clone(), 50);
         store.ingest(MemoryEntry {
             user_id: "u1".to_string(),
             session_id: "s1".to_string(),
@@ -564,6 +608,74 @@ mod tests {
         });
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].task_id, "t1");
+        let _ = fs::remove_dir_all(test_root);
+    }
+
+    #[test]
+    fn file_markdown_store_should_rotate_old_entries_by_session() {
+        let test_root = env::temp_dir().join(format!(
+            "polaris_memory_rotate_test_{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let store = FileMarkdownStore::new(test_root.clone(), 2);
+        for idx in 0..4 {
+            store.ingest(MemoryEntry {
+                user_id: "u1".to_string(),
+                session_id: "s1".to_string(),
+                task_id: format!("t{}", idx),
+                summary: format!("summary {}", idx),
+            });
+        }
+        let session_dir = test_root.join("u1").join("s1");
+        let file_count = fs::read_dir(&session_dir)
+            .ok()
+            .map(|it| it.flatten().count())
+            .unwrap_or(0);
+        assert!(
+            file_count <= 2,
+            "expected rotated file count <= 2, got={}",
+            file_count
+        );
+        let _ = fs::remove_dir_all(test_root);
+    }
+
+    #[test]
+    fn file_markdown_store_should_ignore_corrupted_markdown() {
+        let test_root = env::temp_dir().join(format!(
+            "polaris_memory_corrupt_test_{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let store = FileMarkdownStore::new(test_root.clone(), 50);
+        let user_session_dir = test_root.join("u1").join("s1");
+        let _ = fs::create_dir_all(&user_session_dir);
+
+        // Broken markdown: missing header delimiters/fields.
+        let _ = fs::write(user_session_dir.join("broken.md"), "this is not a valid memory file");
+
+        store.ingest(MemoryEntry {
+            user_id: "u1".to_string(),
+            session_id: "s1".to_string(),
+            task_id: "ok_task".to_string(),
+            summary: "valid summary".to_string(),
+        });
+
+        let rows = store.search(&SearchQuery {
+            user_id: "u1".to_string(),
+            session_id: "s1".to_string(),
+            q: "".to_string(),
+            limit: 10,
+        });
+        assert!(!rows.is_empty(), "expected valid rows to be returned");
+        assert!(
+            rows.iter().any(|r| r.task_id == "ok_task"),
+            "expected valid ingested row to survive corrupt file"
+        );
         let _ = fs::remove_dir_all(test_root);
     }
 }
