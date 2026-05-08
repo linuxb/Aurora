@@ -23,6 +23,15 @@ func (r *failingRouter) Plan(_ string, _ string) (planner.Plan, error) {
 	return planner.Plan{}, errors.New("planner unavailable")
 }
 
+type fakeMemorySearcher struct {
+	entries []MemoryEntry
+	err     error
+}
+
+func (m *fakeMemorySearcher) Search(_ string, _ string, _ string, _ int) ([]MemoryEntry, error) {
+	return m.entries, m.err
+}
+
 func TestCreateSessionRejectsInvalidPlan(t *testing.T) {
 	server := NewServer(scheduler.NewStore(), events.NewMemoryBroker())
 	mux := http.NewServeMux()
@@ -76,7 +85,16 @@ func TestCreateSessionAcceptsValidPlan(t *testing.T) {
 }
 
 func TestCreateSessionPlanPayloadCompatibilityBaseline(t *testing.T) {
-	server := NewServer(scheduler.NewStore(), events.NewMemoryBroker())
+	server := NewServerWithPlannerAndMemory(
+		scheduler.NewStore(),
+		events.NewMemoryBroker(),
+		planner.NewMockRouter(),
+		&fakeMemorySearcher{
+			entries: []MemoryEntry{
+				{UserID: "u-plan-compat", SessionID: "old_sess", TaskID: "old_task", Summary: "recent payment incident"},
+			},
+		},
+	)
 	mux := http.NewServeMux()
 	server.Register(mux)
 
@@ -110,6 +128,10 @@ func TestCreateSessionPlanPayloadCompatibilityBaseline(t *testing.T) {
 	}
 	if _, ok := plan["intent_context"].(map[string]any); !ok {
 		t.Fatalf("intent_context missing or invalid: %#v", plan["intent_context"])
+	}
+	intentContext := plan["intent_context"].(map[string]any)
+	if _, ok := intentContext["memory_hits"]; !ok {
+		t.Fatalf("expected memory_hits injected into intent_context, got=%v", intentContext)
 	}
 	nodes, ok := plan["nodes"].([]any)
 	if !ok || len(nodes) == 0 {

@@ -19,9 +19,17 @@
 - Added unit tests:
   - ingest payload parsing with `user_id` requirement
   - search filtering for user-scope + limit behavior
+- Added `arqo -> polaris` retrieval integration on session planning:
+  - `arqo` optionally calls `polaris /memory/search` when `ARQO_POLARIS_URL` is configured
+  - memory hits are injected into planner `intent_context` as:
+    - `memory_hits`
+    - `memory_hit_count`
+  - integration is best-effort and non-blocking for session creation
+- Added API test coverage for memory context injection in create-session response
 
 ## Verification
 - `cargo test` in `apps/polaris` should pass with new memory retrieval tests.
+- `go test ./...` in `apps/arqo` should pass with memory injection API tests.
 
 ## Pending in Phase 4
 - Add `arqo -> polaris` retrieval call path for planner context injection.

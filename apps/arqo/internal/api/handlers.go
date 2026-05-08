@@ -19,17 +19,27 @@ type Server struct {
 	store   scheduler.Engine
 	broker  events.Broker
 	planner planner.Router
+	memory  MemorySearcher
 }
 
 func NewServer(store scheduler.Engine, broker events.Broker) *Server {
-	return &Server{store: store, broker: broker, planner: planner.NewMockRouter()}
+	return &Server{
+		store:   store,
+		broker:  broker,
+		planner: planner.NewMockRouter(),
+		memory:  NewPolarisMemoryClientFromEnv(),
+	}
 }
 
 func NewServerWithPlanner(store scheduler.Engine, broker events.Broker, dagPlanner planner.Router) *Server {
+	return NewServerWithPlannerAndMemory(store, broker, dagPlanner, NewPolarisMemoryClientFromEnv())
+}
+
+func NewServerWithPlannerAndMemory(store scheduler.Engine, broker events.Broker, dagPlanner planner.Router, memory MemorySearcher) *Server {
 	if dagPlanner == nil {
 		dagPlanner = planner.NewMockRouter()
 	}
-	return &Server{store: store, broker: broker, planner: dagPlanner}
+	return &Server{store: store, broker: broker, planner: dagPlanner, memory: memory}
 }
 
 func (s *Server) Register(mux *http.ServeMux) {
@@ -88,6 +98,16 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "plan_generation_failed", err.Error())
 		return
+	}
+	if plan.IntentContext == nil {
+		plan.IntentContext = map[string]any{}
+	}
+	if s.memory != nil {
+		entries, searchErr := s.memory.Search(req.UserID, "", req.Intent, 5)
+		if searchErr == nil && len(entries) > 0 {
+			plan.IntentContext["memory_hits"] = entries
+			plan.IntentContext["memory_hit_count"] = len(entries)
+		}
 	}
 	validation := planner.ValidateDAG(plan.Nodes)
 	plan.Warnings = validation.Warnings
