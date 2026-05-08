@@ -52,6 +52,11 @@
   - JSON encode/decode via `serde` / `serde_json`
   - entity token extraction via `regex`
   - kept existing backend abstraction (`memory` / `file_md`) and tests passing
+- Upgraded graph extraction from plain token co-occurrence to schema-guided typing:
+  - infer node types (`task`, `status`, `time`, `system`, `keyword`) with regex + dictionary rules
+  - infer relation types (`status_of`, `happened_at`, `executed_by`, fallback `co_occurs`)
+  - preserve endpoint contract while improving semantics for downstream GraphRAG use
+  - added unit assertions for typed nodes and typed relations
 - Added `arqo -> polaris` memory-query strategy controls:
   - query rewrite policy via `ARQO_MEMORY_QUERY_REWRITE` (`none`/`trim`)
   - hit-ranking policy via `ARQO_MEMORY_HIT_RANK` (`none`/`short_first`/`long_first`)
@@ -65,4 +70,4 @@
 - `go test ./...` in `apps/arqo` should pass with memory injection API tests.
 
 ## Pending in Phase 4
-- Improve graph extraction quality from regex baseline to schema-guided entity typing.
+- Improve graph extraction quality from schema-guided baseline to configurable dictionary/LLM-assisted extraction.

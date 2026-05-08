@@ -150,3 +150,12 @@ This file records architecture and product decisions with traceability.
 - `owner`: user + assistant
 - `source`: conversation + `doc/progress/Phase-4-Progress.md`
 - `follow_up`: Continue Phase 4 mainline, then upgrade graph extraction quality from regex baseline.
+### 2026-05-09T11:20:00+08:00 | Phase 4 | Schema-guided graph typing baseline
+- `status`: decided
+- `decision`: Upgrade `polaris` graph extraction from flat co-occurrence to schema-guided typed entities and typed relations.
+- `context`: Phase 4 pending item required better graph semantics while keeping implementation lightweight and testable.
+- `impact`: Memory graph output now carries stronger structure for later GraphRAG ranking and planner context usage.
+- `owner`: user + assistant
+- `source`: conversation + `doc/progress/Phase-4-Progress.md`
+- `follow_up`: Add configurable extraction dictionary and optional LLM-assisted enrichment path.
+

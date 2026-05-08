@@ -3,19 +3,21 @@
 ## Project Structure
 - doc/design 设计文档，你可以通过它们了解系统的设计思路，系统架构以及开发Spec。
   - 文档说明
-    - Arqo-JIT.md JIT机制动态扩图方案，对于无法直接映射为已有Skill的Step，需要再次输入LLM进行子图Planning。
-    - Intent-Router.md 意图路由模块，描述arqo如何从用户的Prompt分析意图，Skill注入拆解为DAG。
-    - System-Spec.md 一些协议Spec，模块之间的交互可以参考。
-    - Aurora-Architechure.md 系统整体架构描述。进行开发计划规划以及进度回顾需要参考。架构review必须参考。
-- doc/progress 开发进度记录，研发时可以回顾之前开发内容。每次研发有一定进展需要补充信息到progress对应文档。
-- doc/review 架构/代码review输出报告的位置。
+    - Arqo-JIT.md JIT机制动态扩图方案，对于无法直接映射为已有Skill的Step，需要再次输入LLM进行子图Planning
+    - Intent-Router.md 意图路由模块，描述arqo如何从用户的Prompt分析意图，Skill注入拆解为DAG
+    - System-Spec.md 一些协议Spec，模块之间的交互可以参考
+    - Aurora-Architechure.md 系统整体架构描述。进行开发计划规划以及进度回顾需要参考。架构review必须参考
+- doc/progress 开发进度记录，研发时可以回顾之前开发内容。每次研发有一定进展需要补充信息到progress对应文档，比如完成了一些待办项要把progress文档对应的记录删除掉，避免后续重复开发
+- doc/review 架构/代码review输出报告的位置
   - logs 常规的code/architecture review记录
-- doc/dev 开发调试指引，包括一些测试工具的使用。
-- doc/spec 开发的具体协议Spec，比如DAG生成约束，Sandbox/Skill交互协议。review阶段或方案制定阶段如果涉及协议，可以输出到该目录。
+- doc/dev 开发调试指引，包括一些测试工具的使用
+- doc/spec 开发的具体协议Spec，比如DAG生成约束，Sandbox/Skill交互协议。review阶段或方案制定阶段如果涉及协议，可以输出到该目录
 - doc/plan 架构设计/优化方案的具体研发计划，review或者新方案架构，或者研发优先级调整需要改动对应的plan文档
   - Phase-Plan.md 项目总体的研发计划，每次计划的调整都要记录在总体研发计划
+- doc/optimization 当需要实现优化时，优化方案以及技术实现细节可以记录在该位置
+
 - 具体工程目录以及功能说明参考 README.md
-- 生成文档时需要按照类别写入特定目录。
+- 生成文档时需要按照类别写入特定目录
 
 ## Plan
 - 第一阶段我们只需要实现核心的框架，一些LLM调用接口可以先实现逻辑，数据可以mock。TS Worker可以简单实现几个demo，不需要模拟函数计算的serverless环境。但是核心的dag流转，调度器核心逻辑，记忆管理（GraphRAG，滚动压缩，内部查询Kvrocks输出的Skill）等需要把核心逻辑实现。
@@ -39,3 +41,4 @@ git branch -M main
 git push -u origin main
 ```
 - 在完成一个模块单元（可以生成对应的测试用例）完成单元测试后，即可进行单个小模块的提交。
+- 开发功能时，先检索能否基于主流成熟的库进行实现，比如SQL操作，HTTP等网络基础操作，编码解码等，避免陷入重复造轮子的无效工作。
