@@ -89,7 +89,8 @@ WHERE status \= 'RUNNING' AND expire\_at \< NOW();
         "skill\_name": { "type": "string" },  
         // skill_sink/expand_planning
         "node_type": { "type": "string" },
-        "dependencies": { "type": "array", "items": { "type": "string" } }  
+        "dependencies": { "type": "array", "items": { "type": "string" } },
+        "mem_hint": { "type": "string" }
       }  
     },  
     "downstream\_wiring": {  
@@ -165,30 +166,6 @@ MERGE (u)-\[r:OBSERVED {
     task\_id: $task\_id,   
     observed\_at: datetime()  
 }\]-\>(e)
-```
-
-### **4.3 内部记忆检索 Skill (The "Remember" Tool)**
-
-注入给大模型的内部工具，用于跨 Task 检索长线记忆。Go 网关在执行此 Skill 时，实现**零信任重写**。
-
-```json
-// Agent 看到的 Skill 描述  
-{  
-  "name": "SearchMemoryGraph",  
-  "description": "如果你需要回想之前任务中的实体关系，请提供实体名称关键词。",  
-  "parameters": { "query": "关于某实体的描述" }  
-}
-```
-
-// Go 网关底层的安全拦截逻辑 (伪代码)  
-
-```go
-func ExecuteGraphSearch(ctx Context, query string) {  
-    userID := ctx.GetUserID()  
-    // 强制在底层图查询中注入 AND node.user\_id \= userID 约束  
-    cypher := generateSafeCypher(query, userID)  
-    graphDB.Execute(cypher)  
-}
 ```
 
 ## **5\. 本地开发拓扑 (Docker Compose 推荐组件)**
