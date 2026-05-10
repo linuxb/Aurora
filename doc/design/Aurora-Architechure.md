@@ -19,8 +19,8 @@ Aurora 采用多语言微服务架构，以实现“控制流”、“数据流�
   * **核心职责**: 异步消费执行结果，与图数据库、KV 存储交互。负责知识榨取（调用 LLM 提取三元组），实现 GraphRAG 双轨检索。  
 * **基础设施层 (Infrastructure)**  
   * **分布式调度状态库**: TiDB (本地开发使用 MySQL 8.0)，利用其分布式事务和锁机制。  
-  * **中间结果存储**: Apache KvRocks，低成本存储海量大体积上下文 (JSON/文本)。  
-  * **事件总线**: Redis，用于发布/订阅 (Pub/Sub) 模式的实时状态推送。  
+  * **中间结果存储**: Rocksdb，低成本存储海量大体积上下文 (JSON/文本)。  
+  * **事件总线**: Redis，用于发布/订阅 (Pub/Sub) 模式的实时状态推送。  （待定）
   * **图数据库**: NebulaGraph (生产) / Memgraph (本地)，用于存储实体关系与时序知识图谱。
 
 ## **2\. 调度引擎设计：亿级并发流转**
@@ -131,16 +131,7 @@ Go 引擎在组装案发现场时，丢弃底层 raw\_stack，只把 human\_read
 
 ### **5.2 解决方案：Token 阈值折叠与时序知识图谱**
 
-#### **5.2.1 短期工作记忆的“惰性摘要 (Lazy Summary)”**
-
-* 工作记忆作为一段递增的 Buffer。当 TS Worker 返回纯文本 summary 时，直接 Append（零 LLM 成本）。  
-* 当 Buffer Token 数量超过阈值（如 2000 Token）时，Go 网关触发“中断”，调用廉价本地小模型将 Buffer 总结压缩为 500 字摘要，清空 Buffer 继续流转。
-
-#### **5.2.2 长期记忆的旁路抽取流水线 (Asynchronous Extraction)**
-
-* **时机**: 绝不在执行主路径上提取图谱。节点完成后，通过 Redis 发送信号，Rust 引擎在后台异步消费。  
-* **数据源过滤**: Rust 引擎仅读取 LLM 执行时的 Thought（思维链）或 TS 返回的极简 summary 进行提取，坚决不碰 KvRocks 里的 raw\_data 原数据。如果TS Worker不执行LLM时，通过TS Worker的输出规约要求输出协议带上summary字段供图谱关系抽取。  
-* 实体抽取。我们经过数据源过滤噪音后生成summry，然后通过Prompt模版约束一个轻量级LLM进行实体抽取，得到JSON结构化输出的实体关系。
+参考Polaris-Mem.md方案设计。
 
 #### **5.2.3 时序多租户知识图谱 (Temporal Multi-Tenant GraphRAG)**
 
