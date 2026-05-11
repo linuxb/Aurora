@@ -167,3 +167,12 @@ This file records architecture and product decisions with traceability.
 - `owner`: user + assistant
 - `source`: conversation + `doc/design/Polaris-Mem.md` + `doc/progress/Phase-4-Progress.md`
 - `follow_up`: Add graph backend adapter parity and configurable extraction dictionary.
+
+### 2026-05-12T10:20:00+08:00 | Phase 4 | Memgraph stub adapter as persistence bridge
+- `status`: decided
+- `decision`: Introduce `memgraph_stub` graph backend to emit normalized Cypher logs before integrating real Memgraph/Kuzu drivers.
+- `context`: Need a testable persistence bridge now, while avoiding unstable driver/network coupling in current local development cycle.
+- `impact`: Preserves delivery velocity and validates graph write contract (`user_id` isolation + `observed_at`) for future drop-in real adapter.
+- `owner`: user + assistant
+- `source`: conversation + `doc/progress/Phase-4-Progress.md`
+- `follow_up`: Replace stub with real driver implementation and add integration tests.

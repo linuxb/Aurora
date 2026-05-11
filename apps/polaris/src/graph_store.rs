@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 use std::env;
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::types::{GraphEdge, GraphNode};
 
@@ -28,12 +31,192 @@ impl GraphStore for InMemoryGraphStore {
     }
 }
 
+pub struct MemgraphStubStore {
+    log_path: String,
+}
+
+impl MemgraphStubStore {
+    fn new(log_path: String) -> Self {
+        Self { log_path }
+    }
+}
+
+impl GraphStore for MemgraphStubStore {
+    fn upsert_graph(&self, user_id: &str, session_id: &str, dag_id: &str, nodes: &[GraphNode], edges: &[GraphEdge]) {
+        let observed_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let mut statements = Vec::new();
+        for node in nodes {
+            statements.push(render_memgraph_node_cypher(
+                user_id,
+                session_id,
+                dag_id,
+                observed_at,
+                node,
+            ));
+        }
+        for edge in edges {
+            statements.push(render_memgraph_edge_cypher(
+                user_id,
+                session_id,
+                dag_id,
+                observed_at,
+                edge,
+            ));
+        }
+        append_lines(&self.log_path, &statements);
+    }
+}
+
 pub fn build_graph_store_from_env() -> Arc<dyn GraphStore> {
     let backend = env::var("POLARIS_GRAPH_BACKEND")
         .unwrap_or_else(|_| "noop".to_string())
         .to_lowercase();
     match backend.as_str() {
         "in_memory" => Arc::new(InMemoryGraphStore::default()),
+        "memgraph_stub" => Arc::new(MemgraphStubStore::new(
+            env::var("POLARIS_MEMGRAPH_STUB_LOG")
+                .unwrap_or_else(|_| "/tmp/polaris-memgraph.cypher.log".to_string()),
+        )),
         _ => Arc::new(NoopGraphStore),
+    }
+}
+
+fn append_lines(path: &str, lines: &[String]) {
+    if lines.is_empty() {
+        return;
+    }
+    let mut file = match OpenOptions::new().create(true).append(true).open(path) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    for line in lines {
+        let _ = writeln!(file, "{line}");
+    }
+}
+
+fn escape_cypher(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('\'', "\\'")
+}
+
+fn render_memgraph_node_cypher(
+    user_id: &str,
+    session_id: &str,
+    dag_id: &str,
+    observed_at: u64,
+    node: &GraphNode,
+) -> String {
+    format!(
+        "MERGE (e:Entity {{id:'{}', user_id:'{}'}}) SET e.label='{}', e.type='{}', e.session_id='{}', e.dag_id='{}', e.observed_at={};",
+        escape_cypher(&node.id),
+        escape_cypher(user_id),
+        escape_cypher(&node.label),
+        escape_cypher(&node.node_type),
+        escape_cypher(session_id),
+        escape_cypher(dag_id),
+        observed_at
+    )
+}
+
+fn render_memgraph_edge_cypher(
+    user_id: &str,
+    session_id: &str,
+    dag_id: &str,
+    observed_at: u64,
+    edge: &GraphEdge,
+) -> String {
+    format!(
+        "MATCH (a:Entity {{id:'{}', user_id:'{}'}}), (b:Entity {{id:'{}', user_id:'{}'}}) MERGE (a)-[r:RELATED {{relation:'{}', user_id:'{}', session_id:'{}', dag_id:'{}'}}]->(b) SET r.weight={}, r.observed_at={};",
+        escape_cypher(&edge.source),
+        escape_cypher(user_id),
+        escape_cypher(&edge.target),
+        escape_cypher(user_id),
+        escape_cypher(&edge.relation),
+        escape_cypher(user_id),
+        escape_cypher(session_id),
+        escape_cypher(dag_id),
+        edge.weight,
+        observed_at
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::graph_store::GraphStore;
+    use super::{append_lines, render_memgraph_edge_cypher, render_memgraph_node_cypher, MemgraphStubStore};
+    use crate::types::{GraphEdge, GraphNode};
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn render_memgraph_cypher_should_include_user_scope() {
+        let node = GraphNode {
+            id: "svc_a".to_string(),
+            label: "ServiceA".to_string(),
+            node_type: "system".to_string(),
+            weight: 1,
+        };
+        let edge = GraphEdge {
+            source: "svc_a".to_string(),
+            target: "svc_b".to_string(),
+            relation: "calls".to_string(),
+            weight: 2,
+        };
+        let n = render_memgraph_node_cypher("u1", "s1", "d1", 123, &node);
+        let e = render_memgraph_edge_cypher("u1", "s1", "d1", 123, &edge);
+        assert!(n.contains("user_id:'u1'"));
+        assert!(e.contains("relation:'calls'"));
+        assert!(e.contains("session_id:'s1'"));
+    }
+
+    #[test]
+    fn memgraph_stub_should_write_cypher_log() {
+        let path = format!(
+            "/tmp/polaris-memgraph-stub-{}.log",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        let store = MemgraphStubStore::new(path.clone());
+        store.upsert_graph(
+            "u1",
+            "s1",
+            "d1",
+            &[GraphNode {
+                id: "svc_a".to_string(),
+                label: "ServiceA".to_string(),
+                node_type: "system".to_string(),
+                weight: 1,
+            }],
+            &[GraphEdge {
+                source: "svc_a".to_string(),
+                target: "svc_b".to_string(),
+                relation: "calls".to_string(),
+                weight: 1,
+            }],
+        );
+        let content = fs::read_to_string(&path).unwrap_or_default();
+        assert!(content.contains("MERGE (e:Entity"));
+        assert!(content.contains("MERGE (a)-[r:RELATED"));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn append_lines_should_append_to_file() {
+        let path = format!(
+            "/tmp/polaris-append-lines-{}.log",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        append_lines(&path, &["a".to_string(), "b".to_string()]);
+        let content = fs::read_to_string(&path).unwrap_or_default();
+        assert!(content.contains("a"));
+        assert!(content.contains("b"));
+        let _ = fs::remove_file(path);
     }
 }

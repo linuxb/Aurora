@@ -102,6 +102,12 @@
   - added `noop` backend (default) and `in_memory` backend as first pluggable target
   - ingestion path now performs graph upsert hook after memory ingest (`rels`-first extraction still preserved)
   - keeps current API behavior stable while preparing Memgraph/Kuzu adapters
+- Added Memgraph adapter stub for graph persistence parity:
+  - new `memgraph_stub` backend under `POLARIS_GRAPH_BACKEND`
+  - emits user-scoped Cypher statements for nodes/edges with `observed_at` timestamp
+  - writes Cypher to append-only log (`POLARIS_MEMGRAPH_STUB_LOG`, default `/tmp/polaris-memgraph.cypher.log`)
+  - validates bridge contract for future real Bolt/Memgraph adapter replacement
+  - added unit tests for Cypher rendering and stub log persistence
 - Integrated `arqo -> polaris` mem_hint query path:
   - `PolarisMemoryClient` now supports `SearchByHint` (`POST /memory/search_by_hint`)
   - enabled via `ARQO_MEMORY_HINT_ENABLED=true`
@@ -114,5 +120,5 @@
 - `go test ./...` in `apps/arqo` should pass with memory injection API tests.
 
 ## Pending in Phase 4
-- Add configurable extraction dictionary and optional LLM-assisted enrichment for `hard_facts/rels`.
-- Introduce persistent graph backend adapter parity (Memgraph/Kuzu) behind current graph extraction interface.
+- Add optional LLM-assisted enrichment for `hard_facts/rels`.
+- Replace `memgraph_stub` with real Memgraph/Kuzu adapter (Bolt/driver integration + retry/timeout policy).
