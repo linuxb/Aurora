@@ -341,11 +341,32 @@ pub fn extract_hard_facts(summary: &str, raw_output: &str) -> Vec<String> {
     for cap in ip_re.find_iter(&text) {
         out.push(format!("IP={}", cap.as_str()));
     }
-    let err_re = Regex::new(r"(?i)\b(error|timeout|failed|refused)\b").expect("invalid regex");
-    if err_re.is_match(&text) {
+    let error_terms = parse_csv_terms(
+        env::var("POLARIS_HARD_FACT_ERROR_TERMS")
+            .ok()
+            .as_deref(),
+        &["error", "timeout", "failed", "refused"],
+    );
+    let lower = text.to_lowercase();
+    if error_terms.iter().any(|term| lower.contains(term)) {
         out.push("HAS_ERROR_SIGNAL=true".to_string());
     }
     dedup_keep_order(out)
+}
+
+fn parse_csv_terms(raw: Option<&str>, defaults: &[&str]) -> HashSet<String> {
+    let mut set = defaults
+        .iter()
+        .map(|s| s.to_string())
+        .collect::<HashSet<_>>();
+    if let Some(custom) = raw {
+        for term in custom.split(',').map(|v| v.trim().to_lowercase()) {
+            if !term.is_empty() {
+                set.insert(term);
+            }
+        }
+    }
+    set
 }
 
 pub fn dedup_keep_order(items: Vec<String>) -> Vec<String> {
@@ -534,7 +555,7 @@ fn walk_markdown_files(root: &Path, f: &mut dyn FnMut(&Path)) {
 mod tests {
     use super::{
         apply_rolling_reduce, dedup_keep_order, extract_hard_facts, filter_entries, InMemoryStore,
-        MemoryStore, RocksDbStore, SearchQuery,
+        MemoryStore, RocksDbStore, SearchQuery, parse_csv_terms,
     };
     use crate::types::MemoryEntry;
     use std::fs;
@@ -623,6 +644,14 @@ mod tests {
             facts.first().cloned().unwrap_or_default(),
         ]);
         assert_eq!(merged.first().map(|v| v.as_str()), Some("A"));
+    }
+
+    #[test]
+    fn parse_csv_terms_should_merge_defaults_and_custom_terms() {
+        let terms = parse_csv_terms(Some("panic,oom"), &["timeout"]);
+        assert!(terms.contains("timeout"));
+        assert!(terms.contains("panic"));
+        assert!(terms.contains("oom"));
     }
 
     #[test]

@@ -91,6 +91,12 @@
     - prefix routing uses `user/session/dag` scope to reduce scan range
     - keeps recent-first semantics after scoped scan
   - added scoped+ordering test for rocksdb prefix retrieval
+- Added configurable extraction dictionaries (no code change required for term expansion):
+  - graph status-term dictionary via `POLARIS_GRAPH_STATUS_TERMS` (comma-separated)
+  - graph system-term dictionary via `POLARIS_GRAPH_SYSTEM_TERMS` (comma-separated)
+  - hard-facts error-signal dictionary via `POLARIS_HARD_FACT_ERROR_TERMS` (comma-separated)
+  - defaults are preserved and merged with custom terms
+  - added unit tests for dictionary parsing merge behavior
 - Integrated `arqo -> polaris` mem_hint query path:
   - `PolarisMemoryClient` now supports `SearchByHint` (`POST /memory/search_by_hint`)
   - enabled via `ARQO_MEMORY_HINT_ENABLED=true`

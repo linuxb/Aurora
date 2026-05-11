@@ -1,5 +1,7 @@
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
+use std::env;
+use std::sync::OnceLock;
 
 use crate::types::{GraphEdge, GraphNode, MemoryEntry};
 
@@ -128,19 +130,56 @@ fn infer_entity_type(raw: &str) -> String {
     {
         return "time".to_string();
     }
-    if matches!(
-        lower.as_str(),
-        "success" | "failed" | "timeout" | "retried" | "recovered" | "error" | "pending"
-    ) {
+    if get_status_terms().contains(&lower) {
         return "status".to_string();
     }
-    if matches!(
-        lower.as_str(),
-        "mysql" | "tidb" | "redis" | "kvrocks" | "docker" | "http" | "grpc"
-    ) {
+    if get_system_terms().contains(&lower) {
         return "system".to_string();
     }
     "keyword".to_string()
+}
+
+fn get_status_terms() -> &'static HashSet<String> {
+    static STATUS_TERMS: OnceLock<HashSet<String>> = OnceLock::new();
+    STATUS_TERMS.get_or_init(|| {
+        parse_terms(
+            env::var("POLARIS_GRAPH_STATUS_TERMS").ok().as_deref(),
+            &[
+                "success",
+                "failed",
+                "timeout",
+                "retried",
+                "recovered",
+                "error",
+                "pending",
+            ],
+        )
+    })
+}
+
+fn get_system_terms() -> &'static HashSet<String> {
+    static SYSTEM_TERMS: OnceLock<HashSet<String>> = OnceLock::new();
+    SYSTEM_TERMS.get_or_init(|| {
+        parse_terms(
+            env::var("POLARIS_GRAPH_SYSTEM_TERMS").ok().as_deref(),
+            &["mysql", "tidb", "redis", "kvrocks", "docker", "http", "grpc"],
+        )
+    })
+}
+
+fn parse_terms(raw: Option<&str>, defaults: &[&str]) -> HashSet<String> {
+    let mut set = defaults
+        .iter()
+        .map(|s| s.to_string())
+        .collect::<HashSet<_>>();
+    if let Some(custom) = raw {
+        for term in custom.split(',').map(|v| v.trim().to_lowercase()) {
+            if !term.is_empty() {
+                set.insert(term);
+            }
+        }
+    }
+    set
 }
 
 fn infer_relation_type(left: &str, right: &str) -> String {
@@ -162,7 +201,7 @@ fn infer_relation_type(left: &str, right: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::build_entity_relation_graph;
+    use super::{build_entity_relation_graph, parse_terms};
     use crate::types::MemoryEntry;
 
     #[test]
@@ -223,5 +262,13 @@ mod tests {
         assert!(edges.iter().any(|e| {
             e.source == "servicea" && e.target == "serviceb" && e.relation == "calls"
         }));
+    }
+
+    #[test]
+    fn parse_terms_should_merge_defaults_and_custom_terms() {
+        let terms = parse_terms(Some("nebula,kuzu"), &["mysql"]);
+        assert!(terms.contains("mysql"));
+        assert!(terms.contains("nebula"));
+        assert!(terms.contains("kuzu"));
     }
 }
