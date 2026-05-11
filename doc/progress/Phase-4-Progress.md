@@ -64,10 +64,27 @@
   - fallback policy via `ARQO_MEMORY_FALLBACK_STRICT` (strict fail vs best-effort empty)
   - default hit limit via `ARQO_MEMORY_HIT_LIMIT`
   - added unit tests for rewrite/ranking/fallback/config parsing
+- Refactored `polaris` into modules for maintainability:
+  - `types.rs`: shared request/response/domain structs
+  - `store.rs`: memory store abstraction + file_md backend + rolling/hard_facts helpers
+  - `graph.rs`: entity/relation extraction and graph assembly
+  - `handlers.rs`: HTTP handler layer and mem_hint route logic
+  - `main.rs`: router wiring/bootstrap only
+- Implemented Polaris-Mem core API semantics (Phase 4):
+  - `POST /ingest` accepts `dag_id`, `task_id` (with `step_id` alias), `raw_output`, `summary`, `hard_facts`, `rels`
+  - `GET /memory/list` supports recent window retrieval by `user_id/session_id/dag_id/limit`
+  - `POST /memory/search_by_hint` supports `KV_POINT_GET` / `GRAPH_TRAVERSAL` / `NONE`
+  - RBO short-circuit for recent-context query and fallback scan path for empty graph traversal
+  - `step_id == arqo task_id` is enforced as a single internal source-of-truth (`task_id`)
+- Added unit tests for Phase 4 memory core:
+  - store scoping (`user/session/dag`) verification
+  - rolling summary + hard_facts merge behavior
+  - hard_facts extraction/dedup check
 
 ## Verification
 - `cargo test` in `apps/polaris` should pass with new memory retrieval tests.
 - `go test ./...` in `apps/arqo` should pass with memory injection API tests.
 
 ## Pending in Phase 4
-- Improve graph extraction quality from schema-guided baseline to configurable dictionary/LLM-assisted extraction.
+- Add configurable extraction dictionary and optional LLM-assisted enrichment for `hard_facts/rels`.
+- Introduce persistent graph backend adapter parity (Memgraph/Kuzu) behind current graph extraction interface.

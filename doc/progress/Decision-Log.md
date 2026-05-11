@@ -159,3 +159,11 @@ This file records architecture and product decisions with traceability.
 - `source`: conversation + `doc/progress/Phase-4-Progress.md`
 - `follow_up`: Add configurable extraction dictionary and optional LLM-assisted enrichment path.
 
+### 2026-05-11T23:55:00+08:00 | Phase 4 | Polaris-Mem modularization and API alignment
+- `status`: decided
+- `decision`: Refactor `polaris` into module boundaries and align memory API to `Polaris-Mem.md` (`ingest/list/search_by_hint`) while enforcing `step_id` as alias of `task_id`.
+- `context`: User requested maintainable module design and confirmed `step_id` equals `arqo` `task_id`.
+- `impact`: Reduced single-file complexity, clearer extension points for future graph backend adapters, and stronger contract consistency between Arqo and Polaris.
+- `owner`: user + assistant
+- `source`: conversation + `doc/design/Polaris-Mem.md` + `doc/progress/Phase-4-Progress.md`
+- `follow_up`: Add graph backend adapter parity and configurable extraction dictionary.
