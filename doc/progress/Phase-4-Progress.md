@@ -138,4 +138,8 @@
 
 ## Pending in Phase 4
 - Add real LLM-assisted enrichment backend for `hard_facts/rels` on top of current `Enricher` interface.
-- Replace `memgraph_stub` with real Memgraph/Kuzu adapter (Bolt/driver integration + retry/timeout policy).
+- Harden `memgraph_bolt` path to production level:
+  - batch writes / connection reuse
+  - retry, timeout, and circuit-breaker/fallback policy
+  - integration tests against real Memgraph docker service
+- Add Kuzu backend parity behind `GraphStore` interface for local-first graph option.
