@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+use crate::graph_store::GraphStore;
 use crate::store::MemoryStore;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -28,6 +29,7 @@ pub struct SearchQuery {
 #[derive(Clone)]
 pub struct AppState {
     pub store: Arc<dyn MemoryStore>,
+    pub graph_store: Arc<dyn GraphStore>,
 }
 
 #[derive(Deserialize)]

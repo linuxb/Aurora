@@ -97,6 +97,11 @@
   - hard-facts error-signal dictionary via `POLARIS_HARD_FACT_ERROR_TERMS` (comma-separated)
   - defaults are preserved and merged with custom terms
   - added unit tests for dictionary parsing merge behavior
+- Added graph backend adapter skeleton for Phase 4 extension:
+  - introduced `GraphStore` trait and backend factory (`POLARIS_GRAPH_BACKEND`)
+  - added `noop` backend (default) and `in_memory` backend as first pluggable target
+  - ingestion path now performs graph upsert hook after memory ingest (`rels`-first extraction still preserved)
+  - keeps current API behavior stable while preparing Memgraph/Kuzu adapters
 - Integrated `arqo -> polaris` mem_hint query path:
   - `PolarisMemoryClient` now supports `SearchByHint` (`POST /memory/search_by_hint`)
   - enabled via `ARQO_MEMORY_HINT_ENABLED=true`

@@ -147,6 +147,14 @@ pub async fn ingest_memory(
 
     let final_entry = apply_rolling_reduce(&state.store, entry);
     state.store.ingest(final_entry.clone());
+    let (nodes, edges) = build_entity_relation_graph(vec![final_entry.clone()]);
+    state.graph_store.upsert_graph(
+        &final_entry.user_id,
+        &final_entry.session_id,
+        &final_entry.dag_id,
+        &nodes,
+        &edges,
+    );
 
     (
         StatusCode::OK,

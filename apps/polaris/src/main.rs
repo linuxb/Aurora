@@ -1,4 +1,5 @@
 mod graph;
+mod graph_store;
 mod handlers;
 mod store;
 mod types;
@@ -11,6 +12,7 @@ use handlers::{
     healthz, ingest_memory, list_memory, list_memory_recent, search_by_hint, search_memory,
     search_memory_graph,
 };
+use graph_store::build_graph_store_from_env;
 use store::build_store_from_env;
 use types::AppState;
 
@@ -21,6 +23,7 @@ async fn main() {
 
     let state = AppState {
         store: build_store_from_env(),
+        graph_store: build_graph_store_from_env(),
     };
 
     let app = Router::new()
