@@ -1,3 +1,4 @@
+mod enrich;
 mod graph;
 mod graph_store;
 mod handlers;
@@ -13,6 +14,7 @@ use handlers::{
     search_memory_graph,
 };
 use graph_store::build_graph_store_from_env;
+use enrich::build_enricher_from_env;
 use store::build_store_from_env;
 use types::AppState;
 
@@ -24,6 +26,7 @@ async fn main() {
     let state = AppState {
         store: build_store_from_env(),
         graph_store: build_graph_store_from_env(),
+        enricher: build_enricher_from_env(),
     };
 
     let app = Router::new()

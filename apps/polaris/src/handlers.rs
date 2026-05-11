@@ -7,6 +7,7 @@ use axum::{
 use serde_json::json;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::enrich::EnrichInput;
 use crate::graph::build_entity_relation_graph;
 use crate::store::{
     apply_rolling_reduce, build_list_query, build_search_query, dedup_keep_order, extract_hard_facts,
@@ -132,6 +133,12 @@ pub async fn ingest_memory(
     let raw_output = req.raw_output.clone().unwrap_or_default();
     let mut hard_facts = req.hard_facts.clone().unwrap_or_default();
     hard_facts.extend(extract_hard_facts(&summary, &raw_output));
+    let enriched = state.enricher.enrich(EnrichInput {
+        summary: summary.clone(),
+        raw_output: raw_output.clone(),
+        hard_facts: dedup_keep_order(hard_facts),
+        rels: req.rels.clone().unwrap_or_default(),
+    });
 
     let entry = MemoryEntry {
         user_id: req.user_id,
@@ -140,8 +147,8 @@ pub async fn ingest_memory(
         task_id: task_id.clone(),
         raw_output,
         summary,
-        hard_facts: dedup_keep_order(hard_facts),
-        rels: req.rels.unwrap_or_default(),
+        hard_facts: dedup_keep_order(enriched.hard_facts),
+        rels: enriched.rels,
         observed_at,
     };
 

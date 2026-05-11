@@ -108,6 +108,14 @@
   - writes Cypher to append-only log (`POLARIS_MEMGRAPH_STUB_LOG`, default `/tmp/polaris-memgraph.cypher.log`)
   - validates bridge contract for future real Bolt/Memgraph adapter replacement
   - added unit tests for Cypher rendering and stub log persistence
+- Added pluggable enrichment hook for memory ingest path:
+  - introduced `Enricher` abstraction and backend factory (`POLARIS_ENRICH_BACKEND`)
+  - `none` backend keeps current behavior (default)
+  - `rule_based` backend extracts:
+    - `ERROR_CODE=ERR_*` facts from `raw_output`
+    - `A calls B` relation triples from `summary` when incoming `rels` is empty
+  - enrichment now runs before final memory persist, then flows into graph upsert
+  - added unit test for rule-based enrichment behavior
 - Integrated `arqo -> polaris` mem_hint query path:
   - `PolarisMemoryClient` now supports `SearchByHint` (`POST /memory/search_by_hint`)
   - enabled via `ARQO_MEMORY_HINT_ENABLED=true`
@@ -120,5 +128,5 @@
 - `go test ./...` in `apps/arqo` should pass with memory injection API tests.
 
 ## Pending in Phase 4
-- Add optional LLM-assisted enrichment for `hard_facts/rels`.
+- Add real LLM-assisted enrichment backend for `hard_facts/rels` on top of current `Enricher` interface.
 - Replace `memgraph_stub` with real Memgraph/Kuzu adapter (Bolt/driver integration + retry/timeout policy).

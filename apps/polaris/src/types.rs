@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+use crate::enrich::Enricher;
 use crate::graph_store::GraphStore;
 use crate::store::MemoryStore;
 
@@ -30,6 +31,7 @@ pub struct SearchQuery {
 pub struct AppState {
     pub store: Arc<dyn MemoryStore>,
     pub graph_store: Arc<dyn GraphStore>,
+    pub enricher: Arc<dyn Enricher>,
 }
 
 #[derive(Deserialize)]

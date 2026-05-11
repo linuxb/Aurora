@@ -176,3 +176,12 @@ This file records architecture and product decisions with traceability.
 - `owner`: user + assistant
 - `source`: conversation + `doc/progress/Phase-4-Progress.md`
 - `follow_up`: Replace stub with real driver implementation and add integration tests.
+
+### 2026-05-12T10:45:00+08:00 | Phase 4 | Enricher plugin point before persistence
+- `status`: decided
+- `decision`: Add pluggable `Enricher` layer (`none` / `rule_based`) in Polaris ingest pipeline before memory+graph persistence.
+- `context`: Need to keep mainline runnable now while creating clean seam for future LLM reduce/enrichment integration.
+- `impact`: Enables incremental extraction quality improvements without changing API contracts; future LLM backend can be introduced with minimal handler/store churn.
+- `owner`: user + assistant
+- `source`: conversation + `doc/progress/Phase-4-Progress.md`
+- `follow_up`: Implement real LLM-assisted enricher and add timeout/fallback policies.
