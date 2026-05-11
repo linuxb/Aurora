@@ -112,28 +112,13 @@ func (s *MySQLStore) CreateDemoSession(userID, intent string) (Snapshot, error) 
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	_, err = tx.Exec(
-		`INSERT INTO sessions (session_id, dag_id, user_id, intent, created_at) VALUES (?, ?, ?, ?, ?)`,
-		sessionID,
-		dagID,
-		userID,
-		intent,
-		now,
-	)
+	_, err = execSQLTx(tx, insertSessionBuilder(sessionID, dagID, userID, intent, now))
 	if err != nil {
 		return Snapshot{}, err
 	}
 
 	intentContextJSON, _ := json.Marshal(map[string]any{"original_intent": intent, "source": "demo"})
-	_, err = tx.Exec(
-		`INSERT INTO dags (dag_id, session_id, user_id, original_intent, intent_context_json, status, replan_count, current_depth, max_depth, jit_unmapped_streak, max_unmapped_streak, created_at) VALUES (?, ?, ?, ?, ?, 'RUNNING', 0, 1, 10, 0, 3, ?)`,
-		dagID,
-		sessionID,
-		userID,
-		intent,
-		string(intentContextJSON),
-		now,
-	)
+	_, err = execSQLTx(tx, insertDAGBuilder(dagID, sessionID, userID, intent, string(intentContextJSON), now))
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -184,27 +169,12 @@ func (s *MySQLStore) CreateJITDemoSession(userID, intent string) (Snapshot, erro
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	_, err = tx.Exec(
-		`INSERT INTO sessions (session_id, dag_id, user_id, intent, created_at) VALUES (?, ?, ?, ?, ?)`,
-		sessionID,
-		dagID,
-		userID,
-		intent,
-		now,
-	)
+	_, err = execSQLTx(tx, insertSessionBuilder(sessionID, dagID, userID, intent, now))
 	if err != nil {
 		return Snapshot{}, err
 	}
 	intentContextJSON, _ := json.Marshal(map[string]any{"original_intent": intent, "source": "jit_demo"})
-	_, err = tx.Exec(
-		`INSERT INTO dags (dag_id, session_id, user_id, original_intent, intent_context_json, status, replan_count, current_depth, max_depth, jit_unmapped_streak, max_unmapped_streak, created_at) VALUES (?, ?, ?, ?, ?, 'RUNNING', 0, 1, 10, 0, 3, ?)`,
-		dagID,
-		sessionID,
-		userID,
-		intent,
-		string(intentContextJSON),
-		now,
-	)
+	_, err = execSQLTx(tx, insertDAGBuilder(dagID, sessionID, userID, intent, string(intentContextJSON), now))
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -292,18 +262,12 @@ func (s *MySQLStore) CreateSessionFromPlan(userID, intent string, intentContext 
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	_, err = tx.Exec(
-		`INSERT INTO sessions (session_id, dag_id, user_id, intent, created_at) VALUES (?, ?, ?, ?, ?)`,
-		sessionID, dagID, userID, intent, now,
-	)
+	_, err = execSQLTx(tx, insertSessionBuilder(sessionID, dagID, userID, intent, now))
 	if err != nil {
 		return Snapshot{}, err
 	}
 	intentContextJSON, _ := json.Marshal(cloneMap(intentContext))
-	_, err = tx.Exec(
-		`INSERT INTO dags (dag_id, session_id, user_id, original_intent, intent_context_json, status, replan_count, current_depth, max_depth, jit_unmapped_streak, max_unmapped_streak, created_at) VALUES (?, ?, ?, ?, ?, 'RUNNING', 0, 1, 10, 0, 3, ?)`,
-		dagID, sessionID, userID, intent, string(intentContextJSON), now,
-	)
+	_, err = execSQLTx(tx, insertDAGBuilder(dagID, sessionID, userID, intent, string(intentContextJSON), now))
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -447,13 +411,7 @@ func (s *MySQLStore) PullReadyTask(workerID string, ttl time.Duration) (*model.T
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	row := tx.QueryRow(`
-SELECT task_id, dag_id, node_type, skill_name, status, pending_dependencies_count, dependencies_json, children_json, parameters_json
-FROM tasks
-WHERE status = 'READY'
-ORDER BY created_at ASC
-LIMIT 1
-FOR UPDATE SKIP LOCKED`)
+	row := queryRowSQLTx(tx, selectReadyTaskForUpdateBuilder())
 
 	task, err := scanReadyTaskRow(row)
 	if err != nil {
@@ -464,7 +422,7 @@ FOR UPDATE SKIP LOCKED`)
 	}
 
 	expireAt := time.Now().UTC().Add(ttl)
-	_, err = tx.Exec(`UPDATE tasks SET status='RUNNING', owner_id=?, expire_at=? WHERE task_id=?`, workerID, expireAt, task.TaskID)
+	_, err = execSQLTx(tx, leaseTaskBuilder(task.TaskID, workerID, expireAt))
 	if err != nil {
 		return nil, err
 	}
@@ -513,36 +471,24 @@ func (s *MySQLStore) CompleteTask(input CompleteTaskInput) (*model.Task, error) 
 	}
 
 	if input.Success {
-		_, err = tx.Exec(`
-UPDATE tasks
-SET status='SUCCESS', owner_id=NULL, expire_at=NULL, last_summary=?, last_error_code=NULL, last_human_readable_error_msg=NULL
-WHERE task_id=?`, input.Summary, input.TaskID)
+		_, err = execSQLTx(tx, markTaskSuccessBuilder(input.TaskID, input.Summary))
 		if err != nil {
 			return nil, err
 		}
 
 		raw, _ := json.Marshal(input.RawData)
-		_, err = tx.Exec(`
-INSERT INTO task_raw_data (task_id, dag_id, raw_data_json, updated_at)
-VALUES (?, ?, ?, ?)
-ON DUPLICATE KEY UPDATE raw_data_json=VALUES(raw_data_json), updated_at=VALUES(updated_at)`, input.TaskID, current.DAGID, string(raw), time.Now().UTC())
+		_, err = execSQLTx(tx, upsertTaskRawDataBuilder(input.TaskID, current.DAGID, string(raw), time.Now().UTC()))
 		if err != nil {
 			return nil, err
 		}
 
 		for _, childID := range current.Children {
-			_, err = tx.Exec(`
-UPDATE tasks
-SET pending_dependencies_count = GREATEST(pending_dependencies_count - 1, 0)
-WHERE task_id = ?`, childID)
+			_, err = execSQLTx(tx, decrementTaskPendingBuilder(childID))
 			if err != nil {
 				return nil, err
 			}
 
-			_, err = tx.Exec(`
-UPDATE tasks
-SET status='READY'
-WHERE task_id = ? AND pending_dependencies_count = 0 AND status = 'PENDING'`, childID)
+			_, err = execSQLTx(tx, readyTaskWhenDependenciesResolvedBuilder(childID))
 			if err != nil {
 				return nil, err
 			}
@@ -552,17 +498,11 @@ WHERE task_id = ? AND pending_dependencies_count = 0 AND status = 'PENDING'`, ch
 			return nil, err
 		}
 	} else {
-		_, err = tx.Exec(`
-UPDATE tasks
-SET status='FAILED', owner_id=NULL, expire_at=NULL, last_summary=?, last_error_code=?, last_human_readable_error_msg=?
-WHERE task_id=?`, input.Summary, input.ErrorCode, input.ErrorMessage, input.TaskID)
+		_, err = execSQLTx(tx, markTaskFailedBuilder(input.TaskID, input.Summary, input.ErrorCode, input.ErrorMessage))
 		if err != nil {
 			return nil, err
 		}
-		_, err = tx.Exec(`
-UPDATE dags
-SET status='REPLANNING', replan_count = replan_count + 1
-WHERE dag_id=?`, current.DAGID)
+		_, err = execSQLTx(tx, markDAGReplanningBuilder(current.DAGID))
 		if err != nil {
 			return nil, err
 		}
@@ -586,11 +526,7 @@ func (s *MySQLStore) ExpireRunningTasks(now time.Time) []string {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	rows, err := tx.Query(`
-SELECT task_id, dag_id
-FROM tasks
-WHERE status='RUNNING' AND expire_at < ?
-FOR UPDATE`, now)
+	rows, err := querySQLTx(tx, selectExpiredRunningTasksForUpdateBuilder(now))
 	if err != nil {
 		return nil
 	}
@@ -608,26 +544,14 @@ FOR UPDATE`, now)
 	}
 
 	for _, taskID := range taskIDs {
-		var stmt string
-		if s.leaseExpirePolicy == LeaseExpirePolicyRetryReady {
-			stmt = `
-UPDATE tasks
-SET status='READY', owner_id=NULL, expire_at=NULL, last_error_code='WORKER_TIMEOUT_RETRY', last_human_readable_error_msg='worker lease expired, task returned to ready queue'
-WHERE task_id=?`
-		} else {
-			stmt = `
-UPDATE tasks
-SET status='FAILED', owner_id=NULL, expire_at=NULL, last_error_code='WORKER_TIMEOUT', last_human_readable_error_msg='worker lease expired'
-WHERE task_id=?`
-		}
-		_, err := tx.Exec(stmt, taskID)
+		_, err := execSQLTx(tx, expireTaskBuilder(taskID, s.leaseExpirePolicy))
 		if err != nil {
 			return nil
 		}
 	}
 	if s.leaseExpirePolicy != LeaseExpirePolicyRetryReady {
 		for dagID := range dagSet {
-			_, err := tx.Exec(`UPDATE dags SET status='REPLANNING', replan_count = replan_count + 1 WHERE dag_id=?`, dagID)
+			_, err := execSQLTx(tx, markDAGReplanningBuilder(dagID))
 			if err != nil {
 				return nil
 			}
@@ -802,24 +726,17 @@ func (s *MySQLStore) insertTask(tx *sql.Tx, taskID, dagID, nodeType, skillName, 
 	depsJSON, _ := json.Marshal(deps)
 	childrenJSON, _ := json.Marshal(children)
 	paramsJSON, _ := json.Marshal(params)
-	_, err := tx.Exec(`
-INSERT INTO tasks (task_id, dag_id, node_type, skill_name, status, pending_dependencies_count, dependencies_json, children_json, parameters_json, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, taskID, dagID, nodeType, skillName, status, pendingCount, string(depsJSON), string(childrenJSON), string(paramsJSON), createdAt)
+	_, err := execSQLTx(tx, insertTaskBuilder(taskID, dagID, nodeType, skillName, status, pendingCount, string(depsJSON), string(childrenJSON), string(paramsJSON), createdAt))
 	return err
 }
 
 func (s *MySQLStore) getTaskByIDTx(tx *sql.Tx, taskID string) (*model.Task, error) {
-	row := tx.QueryRow(`
-SELECT task_id, dag_id, node_type, skill_name, status, pending_dependencies_count, owner_id, expire_at,
-       dependencies_json, children_json, parameters_json, last_summary, last_error_code, last_human_readable_error_msg
-FROM tasks
-WHERE task_id = ?
-FOR UPDATE`, taskID)
+	row := queryRowSQLTx(tx, selectTaskByIDForUpdateBuilder(taskID))
 	return scanTaskRow(row)
 }
 
 func (s *MySQLStore) refreshDAGStatusTx(tx *sql.Tx, dagID string) error {
-	rows, err := tx.Query(`SELECT status FROM tasks WHERE dag_id=?`, dagID)
+	rows, err := querySQLTx(tx, selectTaskStatusesByDAGBuilder(dagID))
 	if err != nil {
 		return err
 	}
@@ -832,7 +749,7 @@ func (s *MySQLStore) refreshDAGStatusTx(tx *sql.Tx, dagID string) error {
 			return err
 		}
 		if status == string(model.TaskStatusFailed) {
-			_, err = tx.Exec(`UPDATE dags SET status='FAILED' WHERE dag_id=?`, dagID)
+			_, err = execSQLTx(tx, markDAGStatusBuilder(dagID, model.DAGStatusFailed))
 			return err
 		}
 		if status != string(model.TaskStatusSuccess) {
@@ -841,7 +758,7 @@ func (s *MySQLStore) refreshDAGStatusTx(tx *sql.Tx, dagID string) error {
 	}
 
 	if allSuccess {
-		_, err = tx.Exec(`UPDATE dags SET status='SUCCESS' WHERE dag_id=?`, dagID)
+		_, err = execSQLTx(tx, markDAGStatusBuilder(dagID, model.DAGStatusSuccess))
 		return err
 	}
 	return nil

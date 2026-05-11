@@ -45,6 +45,7 @@
   - SQL store now persists DAG guardrails (`current_depth`, `max_depth`) and task `parameters_json`.
   - `CompleteTask` supports transactional expansion apply with depth guardrail and downstream dependency redirection.
   - `planning_mode=jit` creation path is now supported by MySQL/TiDB scheduler backend.
+- Refactor note: MySQL/TiDB scheduler SQL access cleanup is tracked in `doc/refactor/2026-05-11-arqo-sql-access-refactor.md`.
 
 ## Integration Verification (2026-04-19T23:00:00+08:00)
 - Environment:

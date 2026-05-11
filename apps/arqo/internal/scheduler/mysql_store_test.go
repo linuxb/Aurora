@@ -9,42 +9,54 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
-func TestMySQLStorePullReadyTaskSuccess(t *testing.T) {
+func newMockMySQLStore(t *testing.T) (*MySQLStore, sqlmock.Sqlmock, func()) {
+	t.Helper()
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock new failed: %v", err)
 	}
-	defer db.Close()
+	return newMySQLStoreWithDB(db), mock, func() {
+		_ = db.Close()
+	}
+}
 
-	store := newMySQLStoreWithDB(db)
+func expectReadyTaskQuery(mock sqlmock.Sqlmock, rows *sqlmock.Rows) {
+	mock.ExpectQuery(`SELECT task_id, dag_id, node_type, skill_name, status, pending_dependencies_count, dependencies_json, children_json, parameters_json`).
+		WillReturnRows(rows)
+}
+
+func readyTaskRows() *sqlmock.Rows {
+	return sqlmock.NewRows([]string{
+		"task_id",
+		"dag_id",
+		"node_type",
+		"skill_name",
+		"status",
+		"pending_dependencies_count",
+		"dependencies_json",
+		"children_json",
+		"parameters_json",
+	})
+}
+
+func TestMySQLStorePullReadyTaskSuccess(t *testing.T) {
+	store, mock, closeDB := newMockMySQLStore(t)
+	defer closeDB()
 
 	mock.ExpectBegin()
-	mock.ExpectQuery(`SELECT task_id, dag_id, node_type, skill_name, status, pending_dependencies_count, dependencies_json, children_json, parameters_json`).
-		WillReturnRows(
-			sqlmock.NewRows([]string{
-				"task_id",
-				"dag_id",
-				"node_type",
-				"skill_name",
-				"status",
-				"pending_dependencies_count",
-				"dependencies_json",
-				"children_json",
-				"parameters_json",
-			}).AddRow(
-				"task_1",
-				"dag_1",
-				"SKILL_SINK",
-				"QueryLog",
-				"READY",
-				0,
-				`[]`,
-				`["task_2"]`,
-				nil,
-			),
-		)
-	mock.ExpectExec(`UPDATE tasks SET status='RUNNING', owner_id=\?, expire_at=\? WHERE task_id=\?`).
-		WithArgs("worker-1", sqlmock.AnyArg(), "task_1").
+	expectReadyTaskQuery(mock, readyTaskRows().AddRow(
+		"task_1",
+		"dag_1",
+		"SKILL_SINK",
+		"QueryLog",
+		"READY",
+		0,
+		`[]`,
+		`["task_2"]`,
+		nil,
+	))
+	mock.ExpectExec(`UPDATE tasks SET status = \?, owner_id = \?, expire_at = \? WHERE task_id = \?`).
+		WithArgs(model.TaskStatusRunning, "worker-1", sqlmock.AnyArg(), "task_1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
@@ -84,30 +96,14 @@ func TestMySQLStorePullReadyTaskSuccess(t *testing.T) {
 }
 
 func TestMySQLStorePullReadyTaskNoRows(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock new failed: %v", err)
-	}
-	defer db.Close()
-
-	store := newMySQLStoreWithDB(db)
+	store, mock, closeDB := newMockMySQLStore(t)
+	defer closeDB()
 
 	mock.ExpectBegin()
-	mock.ExpectQuery(`SELECT task_id, dag_id, node_type, skill_name, status, pending_dependencies_count, dependencies_json, children_json, parameters_json`).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"task_id",
-			"dag_id",
-			"node_type",
-			"skill_name",
-			"status",
-			"pending_dependencies_count",
-			"dependencies_json",
-			"children_json",
-			"parameters_json",
-		}))
+	expectReadyTaskQuery(mock, readyTaskRows())
 	mock.ExpectRollback()
 
-	_, err = store.PullReadyTask("worker-1", time.Minute)
+	_, err := store.PullReadyTask("worker-1", time.Minute)
 	if !errors.Is(err, ErrNoReadyTask) {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -118,24 +114,19 @@ func TestMySQLStorePullReadyTaskNoRows(t *testing.T) {
 }
 
 func TestMySQLStoreExpireRunningTasksFailedReplanPolicy(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock new failed: %v", err)
-	}
-	defer db.Close()
-
-	store := newMySQLStoreWithDB(db)
+	store, mock, closeDB := newMockMySQLStore(t)
+	defer closeDB()
 	store.leaseExpirePolicy = LeaseExpirePolicyFailedReplan
 
 	mock.ExpectBegin()
 	mock.ExpectQuery(`SELECT task_id, dag_id`).
-		WithArgs(sqlmock.AnyArg()).
+		WithArgs(model.TaskStatusRunning, sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"task_id", "dag_id"}).AddRow("task_1", "dag_1"))
 	mock.ExpectExec(`UPDATE tasks`).
-		WithArgs("task_1").
+		WithArgs(nil, nil, model.TaskStatusFailed, "WORKER_TIMEOUT", "worker lease expired", "task_1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(`UPDATE dags SET status='REPLANNING', replan_count = replan_count \+ 1 WHERE dag_id=\?`).
-		WithArgs("dag_1").
+	mock.ExpectExec(`UPDATE dags SET status = \?, replan_count = replan_count \+ 1 WHERE dag_id = \?`).
+		WithArgs(model.DAGStatusReplanning, "dag_1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
@@ -149,21 +140,16 @@ func TestMySQLStoreExpireRunningTasksFailedReplanPolicy(t *testing.T) {
 }
 
 func TestMySQLStoreExpireRunningTasksRetryReadyPolicy(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock new failed: %v", err)
-	}
-	defer db.Close()
-
-	store := newMySQLStoreWithDB(db)
+	store, mock, closeDB := newMockMySQLStore(t)
+	defer closeDB()
 	store.leaseExpirePolicy = LeaseExpirePolicyRetryReady
 
 	mock.ExpectBegin()
 	mock.ExpectQuery(`SELECT task_id, dag_id`).
-		WithArgs(sqlmock.AnyArg()).
+		WithArgs(model.TaskStatusRunning, sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"task_id", "dag_id"}).AddRow("task_1", "dag_1"))
 	mock.ExpectExec(`UPDATE tasks`).
-		WithArgs("task_1").
+		WithArgs(nil, nil, model.TaskStatusReady, "WORKER_TIMEOUT_RETRY", "worker lease expired, task returned to ready queue", "task_1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
