@@ -21,6 +21,7 @@ type MemoryEntry struct {
 
 type MemorySearcher interface {
 	Search(userID, sessionID, query string, limit int) ([]MemoryEntry, error)
+	SearchByHint(userID, sessionID, query string, limit int) ([]MemoryEntry, error)
 }
 
 type PolarisMemoryClient struct {
@@ -30,6 +31,7 @@ type PolarisMemoryClient struct {
 	rankMode     string
 	defaultLimit int
 	strict       bool
+	hintEnabled  bool
 }
 
 func NewPolarisMemoryClientFromEnv() *PolarisMemoryClient {
@@ -45,6 +47,7 @@ func NewPolarisMemoryClientFromEnv() *PolarisMemoryClient {
 		rankMode:     parseEnumEnv("ARQO_MEMORY_HIT_RANK", "none", []string{"none", "short_first", "long_first"}),
 		defaultLimit: parsePositiveIntEnv("ARQO_MEMORY_HIT_LIMIT", 5),
 		strict:       strings.EqualFold(strings.TrimSpace(os.Getenv("ARQO_MEMORY_FALLBACK_STRICT")), "true"),
+		hintEnabled:  strings.EqualFold(strings.TrimSpace(os.Getenv("ARQO_MEMORY_HINT_ENABLED")), "true"),
 	}
 }
 
@@ -107,6 +110,61 @@ func (c *PolarisMemoryClient) Search(userID, sessionID, query string, limit int)
 	return c.rankEntries(payload.Entries), nil
 }
 
+func (c *PolarisMemoryClient) SearchByHint(userID, sessionID, query string, limit int) ([]MemoryEntry, error) {
+	if c == nil || c.baseURL == "" || !c.hintEnabled {
+		return nil, nil
+	}
+	effectiveLimit := limit
+	if effectiveLimit <= 0 {
+		effectiveLimit = c.defaultLimit
+	}
+	effectiveQuery := c.rewriteQuery(query)
+	payload := map[string]any{
+		"user_id":    userID,
+		"session_id": sessionID,
+		"limit":      effectiveLimit,
+		"mem_hint": map[string]any{
+			"strategy":       inferHintStrategy(effectiveQuery),
+			"semantic_query": effectiveQuery,
+		},
+	}
+	body, _ := json.Marshal(payload)
+	reqURL := fmt.Sprintf("%s/memory/search_by_hint", c.baseURL)
+	req, err := http.NewRequest(http.MethodPost, reqURL, strings.NewReader(string(body)))
+	if err != nil {
+		if c.strict {
+			return nil, err
+		}
+		return nil, nil
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.client.Do(req)
+	if err != nil {
+		if c.strict {
+			return nil, err
+		}
+		return nil, nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		err = fmt.Errorf("polaris hint search status=%d", resp.StatusCode)
+		if c.strict {
+			return nil, err
+		}
+		return nil, nil
+	}
+	var out struct {
+		Entries []MemoryEntry `json:"entries"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		if c.strict {
+			return nil, err
+		}
+		return nil, nil
+	}
+	return c.rankEntries(out.Entries), nil
+}
+
 func (c *PolarisMemoryClient) rewriteQuery(query string) string {
 	trimmed := strings.TrimSpace(query)
 	switch c.rewriteMode {
@@ -156,4 +214,15 @@ func parseEnumEnv(key, fallback string, allowed []string) string {
 		}
 	}
 	return fallback
+}
+
+func inferHintStrategy(query string) string {
+	lower := strings.ToLower(strings.TrimSpace(query))
+	if strings.Contains(lower, "relation") || strings.Contains(lower, "dependency") || strings.Contains(lower, "impact") {
+		return "GRAPH_TRAVERSAL"
+	}
+	if strings.Contains(lower, "task ") || strings.Contains(lower, "step ") {
+		return "KV_POINT_GET"
+	}
+	return "NONE"
 }

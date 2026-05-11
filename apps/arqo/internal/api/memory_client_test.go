@@ -114,11 +114,12 @@ func TestNewPolarisMemoryClientFromEnvConfig(t *testing.T) {
 		"ARQO_MEMORY_HIT_RANK":        "short_first",
 		"ARQO_MEMORY_HIT_LIMIT":       "9",
 		"ARQO_MEMORY_FALLBACK_STRICT": "true",
+		"ARQO_MEMORY_HINT_ENABLED":    "true",
 	}
 	for k, v := range env {
 		t.Setenv(k, v)
 	}
-	for _, k := range []string{"ARQO_POLARIS_URL", "ARQO_POLARIS_TIMEOUT_MS", "ARQO_MEMORY_QUERY_REWRITE", "ARQO_MEMORY_HIT_RANK", "ARQO_MEMORY_HIT_LIMIT", "ARQO_MEMORY_FALLBACK_STRICT"} {
+	for _, k := range []string{"ARQO_POLARIS_URL", "ARQO_POLARIS_TIMEOUT_MS", "ARQO_MEMORY_QUERY_REWRITE", "ARQO_MEMORY_HIT_RANK", "ARQO_MEMORY_HIT_LIMIT", "ARQO_MEMORY_FALLBACK_STRICT", "ARQO_MEMORY_HINT_ENABLED"} {
 		if _, ok := env[k]; !ok {
 			t.Setenv(k, "")
 		}
@@ -131,11 +132,63 @@ func TestNewPolarisMemoryClientFromEnvConfig(t *testing.T) {
 	if client.rewriteMode != "trim" || client.rankMode != "short_first" || client.defaultLimit != 9 || !client.strict {
 		t.Fatalf("unexpected client config: %+v", client)
 	}
+	if !client.hintEnabled {
+		t.Fatalf("expected hintEnabled=true, got=%v", client.hintEnabled)
+	}
 	if client.client == nil {
 		t.Fatal("expected non-nil http client")
 	}
 	if got := int(client.client.Timeout.Milliseconds()); got != 2200 {
 		t.Fatalf("unexpected timeout: got=%d", got)
+	}
+}
+
+func TestPolarisMemoryClientSearchByHint(t *testing.T) {
+	var path string
+	var body string
+	client := &PolarisMemoryClient{
+		baseURL: "http://polaris.test",
+		client: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			path = req.URL.Path
+			raw, _ := io.ReadAll(req.Body)
+			body = string(raw)
+			resp := `{"entries":[{"user_id":"u1","session_id":"s1","task_id":"t1","summary":"x"}]}`
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(resp)),
+				Header:     make(http.Header),
+			}, nil
+		})},
+		hintEnabled:  true,
+		defaultLimit: 4,
+		rankMode:     "none",
+		rewriteMode:  "trim",
+		strict:       true,
+	}
+	entries, err := client.SearchByHint("u1", "s1", "dependency graph", 0)
+	if err != nil {
+		t.Fatalf("SearchByHint failed: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got=%d", len(entries))
+	}
+	if path != "/memory/search_by_hint" {
+		t.Fatalf("unexpected path: %s", path)
+	}
+	if !strings.Contains(body, "GRAPH_TRAVERSAL") {
+		t.Fatalf("expected GRAPH_TRAVERSAL strategy in body, got=%s", body)
+	}
+}
+
+func TestInferHintStrategy(t *testing.T) {
+	if got := inferHintStrategy("relation between services"); got != "GRAPH_TRAVERSAL" {
+		t.Fatalf("unexpected strategy for relation query: %s", got)
+	}
+	if got := inferHintStrategy("show task t100 details"); got != "KV_POINT_GET" {
+		t.Fatalf("unexpected strategy for task query: %s", got)
+	}
+	if got := inferHintStrategy("summarize recent status"); got != "NONE" {
+		t.Fatalf("unexpected strategy for default query: %s", got)
 	}
 }
 

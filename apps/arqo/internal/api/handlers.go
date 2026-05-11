@@ -103,7 +103,10 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 		plan.IntentContext = map[string]any{}
 	}
 	if s.memory != nil {
-		entries, searchErr := s.memory.Search(req.UserID, "", req.Intent, 5)
+		entries, searchErr := s.memory.SearchByHint(req.UserID, "", req.Intent, 5)
+		if (searchErr != nil || len(entries) == 0) && req.Intent != "" {
+			entries, searchErr = s.memory.Search(req.UserID, "", req.Intent, 5)
+		}
 		if searchErr == nil && len(entries) > 0 {
 			plan.IntentContext["memory_hits"] = entries
 			plan.IntentContext["memory_hit_count"] = len(entries)

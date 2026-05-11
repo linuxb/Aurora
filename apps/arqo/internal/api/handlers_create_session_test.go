@@ -32,6 +32,10 @@ func (m *fakeMemorySearcher) Search(_ string, _ string, _ string, _ int) ([]Memo
 	return m.entries, m.err
 }
 
+func (m *fakeMemorySearcher) SearchByHint(_ string, _ string, _ string, _ int) ([]MemoryEntry, error) {
+	return m.entries, m.err
+}
+
 func TestCreateSessionRejectsInvalidPlan(t *testing.T) {
 	server := NewServer(scheduler.NewStore(), events.NewMemoryBroker())
 	mux := http.NewServeMux()

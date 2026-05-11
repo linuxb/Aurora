@@ -86,6 +86,12 @@
   - enabled via `POLARIS_MEMORY_BACKEND=rocksdb`
   - storage path via `POLARIS_MEMORY_ROCKSDB_PATH` (default `/tmp/polaris-rocksdb`)
   - added backend unit test for ingest+search parity
+- Integrated `arqo -> polaris` mem_hint query path:
+  - `PolarisMemoryClient` now supports `SearchByHint` (`POST /memory/search_by_hint`)
+  - enabled via `ARQO_MEMORY_HINT_ENABLED=true`
+  - strategy inference baseline: relation/dependency/impact => `GRAPH_TRAVERSAL`, task/step mention => `KV_POINT_GET`, otherwise `NONE`
+  - `createSession` now tries hint-based retrieval first, then falls back to legacy `/memory/search`
+  - added unit tests for hint request payload + strategy inference
 
 ## Verification
 - `cargo test` in `apps/polaris` should pass with new memory retrieval tests.
