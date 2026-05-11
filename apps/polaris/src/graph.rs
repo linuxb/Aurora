@@ -16,6 +16,33 @@ pub fn build_entity_relation_graph(entries: Vec<MemoryEntry>) -> (Vec<GraphNode>
     let mut edge_weights: HashMap<(String, String, String), usize> = HashMap::new();
 
     for entry in entries {
+        if !entry.rels.is_empty() {
+            for rel in &entry.rels {
+                let src_label = rel[0].trim();
+                let dst_label = rel[1].trim();
+                let relation = rel[2].trim();
+                if src_label.is_empty() || dst_label.is_empty() || relation.is_empty() {
+                    continue;
+                }
+                let src_id = src_label.to_lowercase();
+                let dst_id = dst_label.to_lowercase();
+                let src_type = infer_entity_type(src_label);
+                let dst_type = infer_entity_type(dst_label);
+                *node_weights.entry(src_id.clone()).or_insert(0) += 1;
+                *node_weights.entry(dst_id.clone()).or_insert(0) += 1;
+                node_meta
+                    .entry(src_id.clone())
+                    .or_insert((src_label.to_string(), src_type));
+                node_meta
+                    .entry(dst_id.clone())
+                    .or_insert((dst_label.to_string(), dst_type));
+                *edge_weights
+                    .entry((src_id, dst_id, relation.to_string()))
+                    .or_insert(0) += 1;
+            }
+            continue;
+        }
+
         let entities = extract_typed_entities(&entry.summary);
         for entity in &entities {
             *node_weights.entry(entity.id.clone()).or_insert(0) += 1;
@@ -170,5 +197,31 @@ mod tests {
         assert!(!edges.is_empty());
         assert!(nodes.iter().any(|n| n.node_type == "task"));
         assert!(nodes.iter().any(|n| n.node_type == "status"));
+    }
+
+    #[test]
+    fn build_graph_should_prefer_explicit_rels() {
+        let entries = vec![MemoryEntry {
+            user_id: "u1".to_string(),
+            session_id: "s1".to_string(),
+            dag_id: "d1".to_string(),
+            task_id: "t1".to_string(),
+            raw_output: String::new(),
+            summary: "fallback summary words".to_string(),
+            hard_facts: vec![],
+            rels: vec![[
+                "ServiceA".to_string(),
+                "ServiceB".to_string(),
+                "calls".to_string(),
+            ]],
+            observed_at: 1,
+        }];
+
+        let (nodes, edges) = build_entity_relation_graph(entries);
+        assert!(nodes.iter().any(|n| n.id == "servicea"));
+        assert!(nodes.iter().any(|n| n.id == "serviceb"));
+        assert!(edges.iter().any(|e| {
+            e.source == "servicea" && e.target == "serviceb" && e.relation == "calls"
+        }));
     }
 }

@@ -1,4 +1,6 @@
 use regex::Regex;
+use rocksdb::{DB, Options};
+use serde_json;
 use std::collections::HashSet;
 use std::env;
 use std::fs;
@@ -147,11 +149,70 @@ impl MemoryStore for FileMarkdownStore {
     }
 }
 
+pub struct RocksDbStore {
+    db: DB,
+}
+
+impl RocksDbStore {
+    pub fn open(path: &str) -> Result<Self, String> {
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+        let db = DB::open(&opts, path).map_err(|e| format!("open rocksdb failed: {e}"))?;
+        Ok(Self { db })
+    }
+
+    fn make_key(entry: &MemoryEntry) -> String {
+        format!(
+            "{}:{}:{}:{}:{}",
+            sanitize_path_component(&entry.user_id),
+            sanitize_path_component(&entry.session_id),
+            sanitize_path_component(&entry.dag_id),
+            entry.observed_at,
+            sanitize_path_component(&entry.task_id)
+        )
+    }
+}
+
+impl MemoryStore for RocksDbStore {
+    fn ingest(&self, entry: MemoryEntry) {
+        let key = Self::make_key(&entry);
+        if let Ok(value) = serde_json::to_vec(&entry) {
+            let _ = self.db.put(key.as_bytes(), value);
+        }
+    }
+
+    fn list_all(&self) -> Vec<MemoryEntry> {
+        let mut out = Vec::new();
+        for kv in self.db.iterator(rocksdb::IteratorMode::Start) {
+            let (_, value) = match kv {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            if let Ok(entry) = serde_json::from_slice::<MemoryEntry>(&value) {
+                out.push(entry);
+            }
+        }
+        out
+    }
+
+    fn search(&self, query: &SearchQuery) -> Vec<MemoryEntry> {
+        filter_entries(self.list_all(), query)
+    }
+}
+
 pub fn build_store_from_env() -> Arc<dyn MemoryStore> {
     let backend = env::var("POLARIS_MEMORY_BACKEND")
         .unwrap_or_else(|_| "memory".to_string())
         .to_lowercase();
     match backend.as_str() {
+        "rocksdb" => {
+            let path = env::var("POLARIS_MEMORY_ROCKSDB_PATH")
+                .unwrap_or_else(|_| "/tmp/polaris-rocksdb".to_string());
+            match RocksDbStore::open(&path) {
+                Ok(store) => Arc::new(store),
+                Err(_) => Arc::new(InMemoryStore::default()),
+            }
+        }
         "file_md" => {
             let root = env::var("POLARIS_MEMORY_FS_DIR")
                 .unwrap_or_else(|_| "/tmp/polaris-memory".to_string());
@@ -436,9 +497,14 @@ fn walk_markdown_files(root: &Path, f: &mut dyn FnMut(&Path)) {
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_rolling_reduce, dedup_keep_order, extract_hard_facts, filter_entries, InMemoryStore, MemoryStore, SearchQuery};
+    use super::{
+        apply_rolling_reduce, dedup_keep_order, extract_hard_facts, filter_entries, InMemoryStore,
+        MemoryStore, RocksDbStore, SearchQuery,
+    };
     use crate::types::MemoryEntry;
+    use std::fs;
     use std::sync::Arc;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn filter_entries_should_scope_by_user_session_and_dag() {
@@ -522,5 +588,37 @@ mod tests {
             facts.first().cloned().unwrap_or_default(),
         ]);
         assert_eq!(merged.first().map(|v| v.as_str()), Some("A"));
+    }
+
+    #[test]
+    fn rocksdb_store_should_ingest_and_search() {
+        let root = format!(
+            "/tmp/polaris-rocksdb-test-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        let store = RocksDbStore::open(&root).expect("open rocksdb");
+        store.ingest(MemoryEntry {
+            user_id: "u1".to_string(),
+            session_id: "s1".to_string(),
+            dag_id: "d1".to_string(),
+            task_id: "t1".to_string(),
+            raw_output: "raw".to_string(),
+            summary: "hello rocksdb".to_string(),
+            hard_facts: vec![],
+            rels: vec![],
+            observed_at: 1,
+        });
+        let got = store.search(&SearchQuery {
+            user_id: "u1".to_string(),
+            session_id: "s1".to_string(),
+            dag_id: "d1".to_string(),
+            q: "rocksdb".to_string(),
+            limit: 5,
+        });
+        assert_eq!(got.len(), 1);
+        let _ = fs::remove_dir_all(root);
     }
 }

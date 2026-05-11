@@ -80,6 +80,12 @@
   - store scoping (`user/session/dag`) verification
   - rolling summary + hard_facts merge behavior
   - hard_facts extraction/dedup check
+- Added `rocksdb` Episodic Memory backend:
+  - introduced `RocksDbStore` implementing `MemoryStore`
+  - persisted `MemoryEntry` as JSON values keyed by `user_id:session_id:dag_id:observed_at:task_id`
+  - enabled via `POLARIS_MEMORY_BACKEND=rocksdb`
+  - storage path via `POLARIS_MEMORY_ROCKSDB_PATH` (default `/tmp/polaris-rocksdb`)
+  - added backend unit test for ingest+search parity
 
 ## Verification
 - `cargo test` in `apps/polaris` should pass with new memory retrieval tests.
