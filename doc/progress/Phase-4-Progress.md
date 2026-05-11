@@ -108,6 +108,15 @@
   - writes Cypher to append-only log (`POLARIS_MEMGRAPH_STUB_LOG`, default `/tmp/polaris-memgraph.cypher.log`)
   - validates bridge contract for future real Bolt/Memgraph adapter replacement
   - added unit tests for Cypher rendering and stub log persistence
+- Added optional real Memgraph Bolt backend (M2-friendly compile path):
+  - introduced `neo4rs` as optional dependency
+  - feature flag: `memgraph_bolt`
+  - backend key: `POLARIS_GRAPH_BACKEND=memgraph_bolt`
+  - runtime config: `POLARIS_MEMGRAPH_URI`, `POLARIS_MEMGRAPH_USER`, `POLARIS_MEMGRAPH_PASS`
+  - default build remains lightweight (feature disabled), preserving local compile/test stability
+  - verified local compile on macOS M2 via:
+    - `cargo test` (default features)
+    - `cargo test --features memgraph_bolt`
 - Added pluggable enrichment hook for memory ingest path:
   - introduced `Enricher` abstraction and backend factory (`POLARIS_ENRICH_BACKEND`)
   - `none` backend keeps current behavior (default)

@@ -5,6 +5,9 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(feature = "memgraph_bolt")]
+use neo4rs::{query, Graph};
+
 use crate::types::{GraphEdge, GraphNode};
 
 pub trait GraphStore: Send + Sync {
@@ -70,6 +73,75 @@ impl GraphStore for MemgraphStubStore {
     }
 }
 
+#[cfg(feature = "memgraph_bolt")]
+pub struct MemgraphBoltStore {
+    uri: String,
+    user: String,
+    pass: String,
+}
+
+#[cfg(feature = "memgraph_bolt")]
+impl MemgraphBoltStore {
+    fn new(uri: String, user: String, pass: String) -> Self {
+        Self { uri, user, pass }
+    }
+}
+
+#[cfg(feature = "memgraph_bolt")]
+impl GraphStore for MemgraphBoltStore {
+    fn upsert_graph(&self, user_id: &str, session_id: &str, dag_id: &str, nodes: &[GraphNode], edges: &[GraphEdge]) {
+        let uri = self.uri.clone();
+        let user = self.user.clone();
+        let pass = self.pass.clone();
+        let user_id = user_id.to_string();
+        let session_id = session_id.to_string();
+        let dag_id = dag_id.to_string();
+        let nodes = nodes.to_vec();
+        let edges = edges.to_vec();
+        let observed_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+
+        tokio::spawn(async move {
+            let graph = match Graph::new(uri, user, pass).await {
+                Ok(g) => g,
+                Err(_) => return,
+            };
+            for node in nodes {
+                let q = query(
+                    "MERGE (e:Entity {id: $id, user_id: $user_id}) \
+                     SET e.label = $label, e.type = $type, e.session_id = $session_id, e.dag_id = $dag_id, e.observed_at = $observed_at",
+                )
+                .param("id", node.id)
+                .param("user_id", user_id.clone())
+                .param("label", node.label)
+                .param("type", node.node_type)
+                .param("session_id", session_id.clone())
+                .param("dag_id", dag_id.clone())
+                .param("observed_at", observed_at);
+                let _ = graph.run(q).await;
+            }
+            for edge in edges {
+                let q = query(
+                    "MATCH (a:Entity {id: $src, user_id: $user_id}), (b:Entity {id: $dst, user_id: $user_id}) \
+                     MERGE (a)-[r:RELATED {relation: $relation, user_id: $user_id, session_id: $session_id, dag_id: $dag_id}]->(b) \
+                     SET r.weight = $weight, r.observed_at = $observed_at",
+                )
+                .param("src", edge.source)
+                .param("dst", edge.target)
+                .param("relation", edge.relation)
+                .param("user_id", user_id.clone())
+                .param("session_id", session_id.clone())
+                .param("dag_id", dag_id.clone())
+                .param("weight", edge.weight as i64)
+                .param("observed_at", observed_at);
+                let _ = graph.run(q).await;
+            }
+        });
+    }
+}
+
 pub fn build_graph_store_from_env() -> Arc<dyn GraphStore> {
     let backend = env::var("POLARIS_GRAPH_BACKEND")
         .unwrap_or_else(|_| "noop".to_string())
@@ -79,6 +151,12 @@ pub fn build_graph_store_from_env() -> Arc<dyn GraphStore> {
         "memgraph_stub" => Arc::new(MemgraphStubStore::new(
             env::var("POLARIS_MEMGRAPH_STUB_LOG")
                 .unwrap_or_else(|_| "/tmp/polaris-memgraph.cypher.log".to_string()),
+        )),
+        #[cfg(feature = "memgraph_bolt")]
+        "memgraph_bolt" => Arc::new(MemgraphBoltStore::new(
+            env::var("POLARIS_MEMGRAPH_URI").unwrap_or_else(|_| "127.0.0.1:7687".to_string()),
+            env::var("POLARIS_MEMGRAPH_USER").unwrap_or_else(|_| "neo4j".to_string()),
+            env::var("POLARIS_MEMGRAPH_PASS").unwrap_or_else(|_| "neo4j".to_string()),
         )),
         _ => Arc::new(NoopGraphStore),
     }

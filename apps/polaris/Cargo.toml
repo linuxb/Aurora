@@ -10,3 +10,8 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 regex = "1.12.2"
 rocksdb = "0.24.0"
+neo4rs = { version = "0.8.0", optional = true }
+
+[features]
+default = []
+memgraph_bolt = ["dep:neo4rs"]
