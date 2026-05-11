@@ -86,6 +86,11 @@
   - enabled via `POLARIS_MEMORY_BACKEND=rocksdb`
   - storage path via `POLARIS_MEMORY_ROCKSDB_PATH` (default `/tmp/polaris-rocksdb`)
   - added backend unit test for ingest+search parity
+  - upgraded search path from full-table scan to prefix iterator:
+    - key format normalized as `user_id:session_id:dag_id:observed_at(20-digit):task_id`
+    - prefix routing uses `user/session/dag` scope to reduce scan range
+    - keeps recent-first semantics after scoped scan
+  - added scoped+ordering test for rocksdb prefix retrieval
 - Integrated `arqo -> polaris` mem_hint query path:
   - `PolarisMemoryClient` now supports `SearchByHint` (`POST /memory/search_by_hint`)
   - enabled via `ARQO_MEMORY_HINT_ENABLED=true`

@@ -1,5 +1,5 @@
 use regex::Regex;
-use rocksdb::{DB, Options};
+use rocksdb::{DB, Direction, IteratorMode, Options};
 use serde_json;
 use std::collections::HashSet;
 use std::env;
@@ -163,13 +163,27 @@ impl RocksDbStore {
 
     fn make_key(entry: &MemoryEntry) -> String {
         format!(
-            "{}:{}:{}:{}:{}",
+            "{}:{}:{}:{:020}:{}",
             sanitize_path_component(&entry.user_id),
             sanitize_path_component(&entry.session_id),
             sanitize_path_component(&entry.dag_id),
             entry.observed_at,
             sanitize_path_component(&entry.task_id)
         )
+    }
+
+    fn make_prefix(query: &SearchQuery) -> String {
+        let mut prefix = sanitize_path_component(&query.user_id);
+        prefix.push(':');
+        if !query.session_id.is_empty() {
+            prefix.push_str(&sanitize_path_component(&query.session_id));
+            prefix.push(':');
+            if !query.dag_id.is_empty() {
+                prefix.push_str(&sanitize_path_component(&query.dag_id));
+                prefix.push(':');
+            }
+        }
+        prefix
     }
 }
 
@@ -196,7 +210,28 @@ impl MemoryStore for RocksDbStore {
     }
 
     fn search(&self, query: &SearchQuery) -> Vec<MemoryEntry> {
-        filter_entries(self.list_all(), query)
+        let prefix = Self::make_prefix(query);
+        let mut entries = Vec::new();
+        for kv in self
+            .db
+            .iterator(IteratorMode::From(prefix.as_bytes(), Direction::Forward))
+        {
+            let (key, value) = match kv {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let key_str = match std::str::from_utf8(key.as_ref()) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            if !key_str.starts_with(&prefix) {
+                break;
+            }
+            if let Ok(entry) = serde_json::from_slice::<MemoryEntry>(&value) {
+                entries.push(entry);
+            }
+        }
+        filter_entries(entries, query)
     }
 }
 
@@ -619,6 +654,62 @@ mod tests {
             limit: 5,
         });
         assert_eq!(got.len(), 1);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rocksdb_prefix_search_should_scope_and_keep_recent_first() {
+        let root = format!(
+            "/tmp/polaris-rocksdb-prefix-test-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        let store = RocksDbStore::open(&root).expect("open rocksdb");
+        store.ingest(MemoryEntry {
+            user_id: "u1".to_string(),
+            session_id: "s1".to_string(),
+            dag_id: "d1".to_string(),
+            task_id: "t_old".to_string(),
+            raw_output: String::new(),
+            summary: "same query".to_string(),
+            hard_facts: vec![],
+            rels: vec![],
+            observed_at: 10,
+        });
+        store.ingest(MemoryEntry {
+            user_id: "u1".to_string(),
+            session_id: "s1".to_string(),
+            dag_id: "d1".to_string(),
+            task_id: "t_new".to_string(),
+            raw_output: String::new(),
+            summary: "same query".to_string(),
+            hard_facts: vec![],
+            rels: vec![],
+            observed_at: 20,
+        });
+        store.ingest(MemoryEntry {
+            user_id: "u1".to_string(),
+            session_id: "s2".to_string(),
+            dag_id: "d1".to_string(),
+            task_id: "t_other_session".to_string(),
+            raw_output: String::new(),
+            summary: "same query".to_string(),
+            hard_facts: vec![],
+            rels: vec![],
+            observed_at: 30,
+        });
+        let got = store.search(&SearchQuery {
+            user_id: "u1".to_string(),
+            session_id: "s1".to_string(),
+            dag_id: "d1".to_string(),
+            q: "same".to_string(),
+            limit: 10,
+        });
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].task_id, "t_new");
+        assert_eq!(got[1].task_id, "t_old");
         let _ = fs::remove_dir_all(root);
     }
 }
