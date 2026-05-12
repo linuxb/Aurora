@@ -14,17 +14,20 @@ import (
 var ErrModelPlannerUnavailable = errors.New("model planner backend is unavailable")
 
 type ModelRouter struct {
-	endpointURL string
-	modelName   string
-	apiKey      string
-	client      *http.Client
+	endpointURL      string
+	modelName        string
+	apiKey           string
+	client           *http.Client
+	registeredSkills []string
 }
 
 type modelPlanRequest struct {
-	Intent      string `json:"intent"`
-	PlanningMode string `json:"planning_mode"`
-	Model       string `json:"model"`
-	Schema      string `json:"schema"`
+	Intent           string         `json:"intent"`
+	PlanningMode     string         `json:"planning_mode"`
+	Model            string         `json:"model"`
+	Schema           string         `json:"schema"`
+	RegisteredSkills []string       `json:"registered_skills,omitempty"`
+	JSONSchema       map[string]any `json:"json_schema,omitempty"`
 }
 
 type modelPlanResponse struct {
@@ -50,6 +53,7 @@ func NewModelRouterFromEnv() *ModelRouter {
 		client: &http.Client{
 			Timeout: time.Duration(timeoutMS) * time.Millisecond,
 		},
+		registeredSkills: RegisteredSkillsFromEnv(),
 	}
 }
 
@@ -59,10 +63,12 @@ func (r *ModelRouter) Plan(intent string, planningMode string) (Plan, error) {
 	}
 
 	reqBody, _ := json.Marshal(modelPlanRequest{
-		Intent:      intent,
-		PlanningMode: planningMode,
-		Model:       r.modelName,
-		Schema:      "arqo_plan_v1",
+		Intent:           intent,
+		PlanningMode:     planningMode,
+		Model:            r.modelName,
+		Schema:           "arqo_plan_v1",
+		RegisteredSkills: append([]string{}, r.registeredSkills...),
+		JSONSchema:       dagPlanJSONSchema(),
 	})
 	req, err := http.NewRequest(http.MethodPost, r.endpointURL, bytes.NewReader(reqBody))
 	if err != nil {
@@ -109,6 +115,46 @@ func (r *ModelRouter) Plan(intent string, planningMode string) (Plan, error) {
 		plan.IntentContext = payload.IntentContext
 	}
 	return plan, nil
+}
+
+func dagPlanJSONSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"nodes": map[string]any{
+				"type": "array",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"node_id": map[string]any{"type": "string"},
+						"node_type": map[string]any{
+							"type": "string",
+							"enum": []string{"SKILL_SINK", "EXPAND_PLANNING"},
+						},
+						"skill_name": map[string]any{"type": "string"},
+						"dependencies": map[string]any{
+							"type":  "array",
+							"items": map[string]any{"type": "string"},
+						},
+						"mem_hint": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"strategy": map[string]any{
+									"type": "string",
+									"enum": []string{"KV_POINT_GET", "GRAPH_TRAVERSAL", "NONE"},
+								},
+								"target_step_id": map[string]any{"type": "string"},
+								"semantic_query": map[string]any{"type": "string"},
+							},
+							"required": []string{"strategy"},
+						},
+					},
+					"required": []string{"node_id", "node_type", "dependencies"},
+				},
+			},
+		},
+		"required": []string{"nodes"},
+	}
 }
 
 func envOrDefault(key, fallback string) string {

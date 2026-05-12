@@ -9,16 +9,21 @@ type Router interface {
 }
 
 func NewMockRouter() *MockRouter {
-	return &MockRouter{lightweightModel: NewMockLightweightIntentModel()}
+	return &MockRouter{
+		lightweightModel: NewMockLightweightIntentModel(),
+		registeredSkills: RegisteredSkillsFromEnv(),
+	}
 }
 
 type MockRouter struct {
 	lightweightModel LightweightIntentModel
+	registeredSkills []string
 }
 
 func (r *MockRouter) Plan(intent string, planningMode string) (Plan, error) {
 	normalized := strings.ToLower(strings.TrimSpace(intent))
 	planContext := r.lightweightModel.Extract(intent, planningMode)
+	planContext["registered_skills"] = append([]string{}, r.registeredSkills...)
 	if strings.Contains(normalized, "invalid_dag") {
 		plan := NewPlan("mock", []Node{
 			{NodeID: "node_a", NodeType: model.NodeTypeSkillSink, SkillName: "QueryLog", Dependencies: []string{"missing_node"}},

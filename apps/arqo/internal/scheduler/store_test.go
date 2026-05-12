@@ -714,3 +714,41 @@ func TestExpansionUnmappedStreakExhaustedReturnsMissingSkill(t *testing.T) {
 		t.Fatalf("unexpected dag status: %s", final.DAG.Status)
 	}
 }
+
+func TestExpansionRejectsInvalidMemHintSchema(t *testing.T) {
+	store := NewStore()
+	_, err := store.CreateJITDemoSession("u-jit", "invalid mem hint")
+	if err != nil {
+		t.Fatalf("create jit session failed: %v", err)
+	}
+	planner, err := store.PullReadyTask("planner-worker", time.Minute)
+	if err != nil {
+		t.Fatalf("pull planner failed: %v", err)
+	}
+	_, err = store.CompleteTask(CompleteTaskInput{
+		TaskID:   planner.TaskID,
+		WorkerID: "planner-worker",
+		Success:  true,
+		Summary:  "invalid mem hint",
+		ExpansionPayload: &ExpansionPayload{
+			Reasoning:     "invalid mem hint schema",
+			MappingStatus: ExpansionMappingMapped,
+			NewNodes: []ExpansionNode{
+				{
+					NodeID:       "dyn_invalid_hint",
+					NodeType:     model.NodeTypeExpandPlanning,
+					SkillName:    "ReActPlanner",
+					MemHint:      &MemHint{Strategy: MemHintStrategyKVPointGet},
+					Dependencies: []string{planner.TaskID},
+				},
+			},
+			DownstreamWiring: DownstreamWiring{
+				RedirectFrom: planner.TaskID,
+				RedirectTo:   []string{"dyn_invalid_hint"},
+			},
+		},
+	})
+	if err != ErrExpansionInvalid {
+		t.Fatalf("expected ErrExpansionInvalid for invalid mem_hint, got=%v", err)
+	}
+}

@@ -49,6 +49,7 @@ const reactPlanner: SkillRunner = async (taskID, parameters) => {
   const collectB = `${taskID}_dyn_collect_b`;
   const followupPlanner = `${taskID}_dyn_followup_planner`;
   const intentContext = (parameters?.intent_context as Record<string, unknown> | undefined) ?? {};
+  const memHint = (parameters?.mem_hint as Record<string, unknown> | undefined) ?? {};
   const shouldKeepExpanding = String(intentContext?.macro_intent ?? "").includes("unknown_skill");
 
   return {
@@ -57,6 +58,7 @@ const reactPlanner: SkillRunner = async (taskID, parameters) => {
       planning_mode: "jit",
       decision: "expand",
       intent_context: intentContext,
+      mem_hint: memHint,
     },
     summary: shouldKeepExpanding
       ? "Planner cannot fully map skills yet and schedules a follow-up planning node."
@@ -83,7 +85,12 @@ const reactPlanner: SkillRunner = async (taskID, parameters) => {
           node_id: followupPlanner,
           node_type: "EXPAND_PLANNING",
           skill_name: "ReActPlanner",
-          parameters: { from: "reactPlanner", intent_context: intentContext },
+          mem_hint: {
+            strategy: "GRAPH_TRAVERSAL",
+            semantic_query: String(memHint.semantic_query ?? "recent dependency context"),
+            target_step_id: String(memHint.target_step_id ?? collectA),
+          },
+          parameters: { from: "reactPlanner", intent_context: intentContext, mem_hint: memHint },
           dependencies: [collectA, collectB],
         },
       ],

@@ -15,8 +15,15 @@ export interface ExpansionNode {
   node_id: string;
   node_type: "SKILL_SINK" | "EXPAND_PLANNING";
   skill_name: string;
+  mem_hint?: MemHint;
   parameters?: Record<string, unknown>;
   dependencies: string[];
+}
+
+export interface MemHint {
+  strategy: "KV_POINT_GET" | "GRAPH_TRAVERSAL" | "NONE";
+  target_step_id?: string;
+  semantic_query?: string;
 }
 
 export interface DownstreamWiring {

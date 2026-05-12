@@ -29,6 +29,7 @@ type ExpansionNode struct {
 	NodeID       string         `json:"node_id"`
 	NodeType     model.NodeType `json:"node_type"`
 	SkillName    string         `json:"skill_name"`
+	MemHint      *MemHint       `json:"mem_hint,omitempty"`
 	Parameters   map[string]any `json:"parameters,omitempty"`
 	Dependencies []string       `json:"dependencies"`
 }

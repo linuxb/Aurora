@@ -827,6 +827,9 @@ WHERE task_id=?`, planner.TaskID)
 		if node.NodeType == model.NodeTypeExpandPlanning && node.SkillName != "" && node.SkillName != "ReActPlanner" {
 			return ErrExpansionInvalid
 		}
+		if err := ValidateMemHint(node.MemHint); err != nil {
+			return ErrExpansionInvalid
+		}
 		if _, exists := newNodes[node.NodeID]; exists {
 			return ErrExpansionInvalid
 		}
@@ -882,6 +885,12 @@ WHERE task_id=?`, input.Summary, planner.TaskID)
 			status = "READY"
 		}
 		params := node.Parameters
+		if node.MemHint != nil {
+			if params == nil {
+				params = map[string]any{}
+			}
+			params["mem_hint"] = node.MemHint
+		}
 		if node.NodeType == model.NodeTypeExpandPlanning {
 			var intentContext map[string]any
 			if rawIntentContext.Valid && rawIntentContext.String != "" && rawIntentContext.String != "null" {

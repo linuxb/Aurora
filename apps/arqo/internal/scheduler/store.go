@@ -11,9 +11,9 @@ import (
 )
 
 var (
-	ErrNoReadyTask     = errors.New("no ready task")
-	ErrTaskNotFound    = errors.New("task not found")
-	ErrTaskNotRunnable = errors.New("task is not running under this worker")
+	ErrNoReadyTask      = errors.New("no ready task")
+	ErrTaskNotFound     = errors.New("task not found")
+	ErrTaskNotRunnable  = errors.New("task is not running under this worker")
 	ErrReplanNotAllowed = errors.New("replan is allowed only when dag is in REPLANNING")
 )
 
@@ -58,11 +58,11 @@ func NewStore() *Store {
 func NewStoreWithLeasePolicy(policy LeaseExpirePolicy) *Store {
 	return &Store{
 		leaseExpirePolicy: parseLeaseExpirePolicy(string(policy)),
-		sessions:     make(map[string]model.Session),
-		dags:         make(map[string]model.DAG),
-		tasksByID:    make(map[string]*model.Task),
-		tasksByDAG:   make(map[string][]string),
-		rawDataByDAG: make(map[string]map[string]any),
+		sessions:          make(map[string]model.Session),
+		dags:              make(map[string]model.DAG),
+		tasksByID:         make(map[string]*model.Task),
+		tasksByDAG:        make(map[string][]string),
+		rawDataByDAG:      make(map[string]map[string]any),
 	}
 }
 
@@ -531,6 +531,12 @@ func (s *Store) applyExpansionLocked(task *model.Task, input CompleteTaskInput) 
 			Children:                 []string{},
 			Parameters:               node.Parameters,
 		}
+		if node.MemHint != nil {
+			if taskNode.Parameters == nil {
+				taskNode.Parameters = map[string]any{}
+			}
+			taskNode.Parameters["mem_hint"] = node.MemHint
+		}
 		if taskNode.NodeType == model.NodeTypeExpandPlanning {
 			taskNode.Parameters = injectIntentContext(taskNode.Parameters, dag.IntentContext)
 		}
@@ -609,6 +615,9 @@ func (s *Store) validateExpansionLocked(task *model.Task, payload *ExpansionPayl
 			return ErrExpansionInvalid
 		}
 		if node.NodeType == model.NodeTypeExpandPlanning && node.SkillName != "" && node.SkillName != "ReActPlanner" {
+			return ErrExpansionInvalid
+		}
+		if err := ValidateMemHint(node.MemHint); err != nil {
 			return ErrExpansionInvalid
 		}
 		if _, exists := s.tasksByID[node.NodeID]; exists {

@@ -102,16 +102,6 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 	if plan.IntentContext == nil {
 		plan.IntentContext = map[string]any{}
 	}
-	if s.memory != nil {
-		entries, searchErr := s.memory.SearchByHint(req.UserID, "", req.Intent, 5)
-		if (searchErr != nil || len(entries) == 0) && req.Intent != "" {
-			entries, searchErr = s.memory.Search(req.UserID, "", req.Intent, 5)
-		}
-		if searchErr == nil && len(entries) > 0 {
-			plan.IntentContext["memory_hits"] = entries
-			plan.IntentContext["memory_hit_count"] = len(entries)
-		}
-	}
 	validation := planner.ValidateDAG(plan.Nodes)
 	plan.Warnings = validation.Warnings
 	if !validation.Valid {
@@ -180,6 +170,7 @@ func (s *Server) pullTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if sessionID, ok := s.store.ResolveSessionIDByTaskID(task.TaskID); ok {
+		task = s.enrichPlannerTaskWithMemory(task, sessionID)
 		s.publishEvent(r.Context(), events.Event{
 			SessionID: sessionID,
 			EventType: "TASK_LEASED",
@@ -191,6 +182,75 @@ func (s *Server) pullTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, http.StatusOK, task)
+}
+
+func (s *Server) enrichPlannerTaskWithMemory(task *model.Task, sessionID string) *model.Task {
+	if task == nil || task.NodeType != model.NodeTypeExpandPlanning || s.memory == nil {
+		return task
+	}
+	snapshot, err := s.store.GetSessionSnapshot(sessionID)
+	if err != nil {
+		return task
+	}
+	if task.Parameters == nil {
+		task.Parameters = map[string]any{}
+	}
+	memHint := buildMemHintFromDependencies(snapshot.RawData, task.Dependencies)
+	task.Parameters["mem_hint"] = memHint
+	semanticQuery := memHint.SemanticQuery
+	entries, searchErr := s.memory.SearchByHint(snapshot.Session.UserID, sessionID, semanticQuery, 5)
+	if (searchErr != nil || len(entries) == 0) && semanticQuery != "" {
+		entries, searchErr = s.memory.Search(snapshot.Session.UserID, sessionID, semanticQuery, 5)
+	}
+	if searchErr == nil && len(entries) > 0 {
+		task.Parameters["memory_hits"] = entries
+		task.Parameters["memory_hit_count"] = len(entries)
+	}
+	return task
+}
+
+func buildMemHintFromDependencies(rawData map[string]any, depTaskIDs []string) scheduler.MemHint {
+	semanticParts := make([]string, 0, len(depTaskIDs))
+	for _, depID := range depTaskIDs {
+		v, ok := rawData[depID]
+		if !ok {
+			continue
+		}
+		switch typed := v.(type) {
+		case map[string]any:
+			if summary, ok := typed["summary"]; ok {
+				semanticParts = append(semanticParts, fmt.Sprintf("%v", summary))
+				continue
+			}
+			if markdown, ok := typed["markdown"]; ok {
+				semanticParts = append(semanticParts, fmt.Sprintf("%v", markdown))
+				continue
+			}
+			semanticParts = append(semanticParts, fmt.Sprintf("%v", typed))
+		case string:
+			semanticParts = append(semanticParts, typed)
+		default:
+			semanticParts = append(semanticParts, fmt.Sprintf("%v", typed))
+		}
+	}
+	semanticQuery := strings.TrimSpace(strings.Join(semanticParts, " ; "))
+	if semanticQuery == "" {
+		semanticQuery = "recent dependency context"
+	}
+	return scheduler.MemHint{
+		Strategy:      scheduler.MemHintStrategy(scheduler.NormalizeMemHintStrategy(inferHintStrategy(semanticQuery))),
+		SemanticQuery: semanticQuery,
+		TargetStepID:  firstNonEmpty(depTaskIDs),
+	}
+}
+
+func firstNonEmpty(items []string) string {
+	for _, v := range items {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 type completeTaskRequest struct {

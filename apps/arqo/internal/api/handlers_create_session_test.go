@@ -134,8 +134,8 @@ func TestCreateSessionPlanPayloadCompatibilityBaseline(t *testing.T) {
 		t.Fatalf("intent_context missing or invalid: %#v", plan["intent_context"])
 	}
 	intentContext := plan["intent_context"].(map[string]any)
-	if _, ok := intentContext["memory_hits"]; !ok {
-		t.Fatalf("expected memory_hits injected into intent_context, got=%v", intentContext)
+	if _, ok := intentContext["registered_skills"]; !ok {
+		t.Fatalf("expected registered_skills in intent_context, got=%v", intentContext)
 	}
 	nodes, ok := plan["nodes"].([]any)
 	if !ok || len(nodes) == 0 {
@@ -150,6 +150,56 @@ func TestCreateSessionPlanPayloadCompatibilityBaseline(t *testing.T) {
 		if _, ok := firstNode[field]; !ok {
 			t.Fatalf("node missing required field %s: %#v", field, firstNode)
 		}
+	}
+}
+
+func TestPullTaskInjectsPlannerMemHintAndMemoryHits(t *testing.T) {
+	server := NewServerWithPlannerAndMemory(
+		scheduler.NewStore(),
+		events.NewMemoryBroker(),
+		planner.NewMockRouter(),
+		&fakeMemorySearcher{
+			entries: []MemoryEntry{
+				{UserID: "u-mem", SessionID: "s1", TaskID: "t1", Summary: "recent failure context"},
+			},
+		},
+	)
+	mux := http.NewServeMux()
+	server.Register(mux)
+
+	createBody := map[string]any{
+		"user_id":       "u-mem",
+		"intent":        "investigate issue",
+		"planning_mode": "jit",
+	}
+	createRaw, _ := json.Marshal(createBody)
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/sessions", bytes.NewReader(createRaw))
+	createRes := httptest.NewRecorder()
+	mux.ServeHTTP(createRes, createReq)
+	if createRes.Code != http.StatusCreated {
+		t.Fatalf("create failed: status=%d body=%s", createRes.Code, createRes.Body.String())
+	}
+
+	pullRaw, _ := json.Marshal(map[string]any{"worker_id": "w1"})
+	pullReq := httptest.NewRequest(http.MethodPost, "/v1/tasks/pull", bytes.NewReader(pullRaw))
+	pullRes := httptest.NewRecorder()
+	mux.ServeHTTP(pullRes, pullReq)
+	if pullRes.Code != http.StatusOK {
+		t.Fatalf("pull failed: status=%d body=%s", pullRes.Code, pullRes.Body.String())
+	}
+	var task map[string]any
+	if err := json.Unmarshal(pullRes.Body.Bytes(), &task); err != nil {
+		t.Fatalf("invalid pull response: %v", err)
+	}
+	params, ok := task["parameters"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing task parameters: %#v", task)
+	}
+	if _, ok := params["mem_hint"]; !ok {
+		t.Fatalf("expected mem_hint in planner parameters: %v", params)
+	}
+	if _, ok := params["memory_hits"]; !ok {
+		t.Fatalf("expected memory_hits in planner parameters: %v", params)
 	}
 }
 
