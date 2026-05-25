@@ -147,6 +147,10 @@
     - `GRAPH_GLOBAL_SUMMARY` => return top community macro summaries
   - ingest path now feeds Plato observe/recluster pipeline after graph extraction
   - added Plato unit tests for local/global query behavior
+  - added configurable analytics adapter backends (`PLATO_ANALYTICS_BACKEND`):
+    - `local_scc` (default, petgraph SCC partition)
+    - `local_louvain_approx` (local-first Louvain-style approximation path)
+    - `memgraph_mage_stub` (cloud adapter seam for future Leiden call-down)
 - Refactored Polaris Rust source layout into folder-based modules:
   - `api/` (`handlers`)
   - `memory/` (`store`, `enrich`)
@@ -174,3 +178,4 @@
   - integration tests against real Memgraph docker service
 - Add Kuzu backend parity behind `GraphStore` interface for local-first graph option.
 - Upgrade Plato global summary generation from rule-based template to async LLM map-reduce pipeline.
+- Replace `memgraph_mage_stub` with real Memgraph MAGE/Leiden call-down implementation and integration tests.

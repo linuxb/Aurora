@@ -52,6 +52,50 @@ impl GraphAnalyticsAdapter for PetgraphCommunityAdapter {
     }
 }
 
+pub struct LouvainApproxAdapter;
+
+impl GraphAnalyticsAdapter for LouvainApproxAdapter {
+    fn detect_communities(&self, nodes: &[GraphNode], edges: &[GraphEdge]) -> HashMap<String, String> {
+        // Local-first approximation: start from SCC result and coarsen low-weight isolated nodes.
+        let base = PetgraphCommunityAdapter.detect_communities(nodes, edges);
+        let mut community_sizes = HashMap::<String, usize>::new();
+        for cid in base.values() {
+            *community_sizes.entry(cid.clone()).or_insert(0) += 1;
+        }
+        let mut out = HashMap::new();
+        for n in nodes {
+            let cid = base
+                .get(&n.id)
+                .cloned()
+                .unwrap_or_else(|| "c_fallback".to_string());
+            let size = community_sizes.get(&cid).copied().unwrap_or(1);
+            if size == 1 && n.weight <= 1 {
+                out.insert(n.id.clone(), "c_noise".to_string());
+            } else {
+                out.insert(n.id.clone(), cid);
+            }
+        }
+        out
+    }
+}
+
+pub struct MemgraphMageStubAdapter;
+
+impl GraphAnalyticsAdapter for MemgraphMageStubAdapter {
+    fn detect_communities(&self, nodes: &[GraphNode], edges: &[GraphEdge]) -> HashMap<String, String> {
+        // Stub behavior: keep deterministic local partition while reserving adapter seam
+        // for future "CALL community.leiden()" remote execution.
+        PetgraphCommunityAdapter.detect_communities(nodes, edges)
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub enum PlatoAnalyticsBackend {
+    LocalScc,
+    LocalLouvainApprox,
+    MemgraphMageStub,
+}
+
 #[derive(Default)]
 struct ScopeState {
     dirty_edges_count: usize,
@@ -62,14 +106,38 @@ struct ScopeState {
 
 pub struct PlatoEngine {
     adapter: Box<dyn GraphAnalyticsAdapter>,
+    backend: PlatoAnalyticsBackend,
     inner: Mutex<HashMap<String, ScopeState>>,
 }
 
 impl PlatoEngine {
     pub fn new_default() -> Self {
+        let backend = match env::var("PLATO_ANALYTICS_BACKEND")
+            .unwrap_or_else(|_| "local_scc".to_string())
+            .to_lowercase()
+            .as_str()
+        {
+            "local_louvain_approx" => PlatoAnalyticsBackend::LocalLouvainApprox,
+            "memgraph_mage_stub" => PlatoAnalyticsBackend::MemgraphMageStub,
+            _ => PlatoAnalyticsBackend::LocalScc,
+        };
+        let adapter: Box<dyn GraphAnalyticsAdapter> = match backend {
+            PlatoAnalyticsBackend::LocalScc => Box::new(PetgraphCommunityAdapter),
+            PlatoAnalyticsBackend::LocalLouvainApprox => Box::new(LouvainApproxAdapter),
+            PlatoAnalyticsBackend::MemgraphMageStub => Box::new(MemgraphMageStubAdapter),
+        };
         Self {
-            adapter: Box::new(PetgraphCommunityAdapter),
+            adapter,
+            backend,
             inner: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub fn backend_name(&self) -> &'static str {
+        match self.backend {
+            PlatoAnalyticsBackend::LocalScc => "local_scc",
+            PlatoAnalyticsBackend::LocalLouvainApprox => "local_louvain_approx",
+            PlatoAnalyticsBackend::MemgraphMageStub => "memgraph_mage_stub",
         }
     }
 
@@ -310,5 +378,11 @@ mod tests {
         let (n, e) = engine.query_local(&nodes, &edges, &["payment".into()], "");
         assert!(!n.is_empty());
         assert!(!e.is_empty());
+    }
+
+    #[test]
+    fn backend_name_should_be_non_empty() {
+        let engine = PlatoEngine::new_default();
+        assert!(!engine.backend_name().is_empty());
     }
 }
