@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::env;
 use std::sync::OnceLock;
 
-use crate::types::{GraphEdge, GraphNode, MemoryEntry};
+use crate::model::types::{GraphEdge, GraphNode, MemoryEntry};
 
 #[derive(Clone, Debug)]
 struct TypedEntity {
@@ -202,7 +202,7 @@ fn infer_relation_type(left: &str, right: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{build_entity_relation_graph, parse_terms};
-    use crate::types::MemoryEntry;
+    use crate::model::types::MemoryEntry;
 
     #[test]
     fn build_graph_should_create_typed_nodes_and_edges() {

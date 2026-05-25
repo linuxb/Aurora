@@ -7,7 +7,7 @@ use std::env;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::types::{GraphEdge, GraphNode};
+use crate::model::types::{GraphEdge, GraphNode};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct CommunitySummary {
@@ -282,7 +282,7 @@ fn now_unix() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::PlatoEngine;
-    use crate::types::{GraphEdge, GraphNode};
+    use crate::model::types::{GraphEdge, GraphNode};
 
     #[test]
     fn query_global_should_return_summary_after_threshold_trigger() {

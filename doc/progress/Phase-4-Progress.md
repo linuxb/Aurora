@@ -140,6 +140,14 @@
     - `GRAPH_GLOBAL_SUMMARY` => return top community macro summaries
   - ingest path now feeds Plato observe/recluster pipeline after graph extraction
   - added Plato unit tests for local/global query behavior
+- Refactored Polaris Rust source layout into folder-based modules:
+  - `api/` (`handlers`)
+  - `memory/` (`store`, `enrich`)
+  - `graph/` (`extractor`, `store`)
+  - `plato/` (`engine`)
+  - `model/` (`types`)
+  - updated imports/module wiring in `main.rs` without behavior change
+  - verified full test pass after refactor
 - Integrated `arqo -> polaris` mem_hint query path:
   - `PolarisMemoryClient` now supports `SearchByHint` (`POST /memory/search_by_hint`)
   - enabled via `ARQO_MEMORY_HINT_ENABLED=true`

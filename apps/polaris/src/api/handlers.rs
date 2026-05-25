@@ -7,13 +7,13 @@ use axum::{
 use serde_json::json;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::enrich::EnrichInput;
-use crate::graph::build_entity_relation_graph;
-use crate::store::{
+use crate::memory::enrich::EnrichInput;
+use crate::graph::extractor::build_entity_relation_graph;
+use crate::memory::store::{
     apply_rolling_reduce, build_list_query, build_search_query, dedup_keep_order, extract_hard_facts,
     fulltext_contains, is_recent_context,
 };
-use crate::types::{
+use crate::model::types::{
     AppState, EntriesResponse, GraphResponse, IngestRequest, ListQueryParams, MemHint,
     MemHintSearchRequest, MemoryEntry, SearchQuery, SearchQueryParams,
 };
@@ -156,7 +156,7 @@ pub async fn ingest_memory(
     let final_entry = apply_rolling_reduce(&state.store, entry);
     state.store.ingest(final_entry.clone());
     let (nodes, edges) = build_entity_relation_graph(vec![final_entry.clone()]);
-    let scope_key = crate::plato::PlatoEngine::scope_key(
+    let scope_key = crate::plato::engine::PlatoEngine::scope_key(
         &final_entry.user_id,
         &final_entry.session_id,
         &final_entry.dag_id,
@@ -310,7 +310,7 @@ pub async fn search_by_hint(
         "GRAPH_GLOBAL_SUMMARY" => {
             let entries = state.store.search(&base_query);
             let (nodes, edges) = build_entity_relation_graph(entries.clone());
-            let scope_key = crate::plato::PlatoEngine::scope_key(
+            let scope_key = crate::plato::engine::PlatoEngine::scope_key(
                 &req.user_id,
                 &req.session_id,
                 &dag_id,

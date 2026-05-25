@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(feature = "memgraph_bolt")]
 use neo4rs::{query, Graph};
 
-use crate::types::{GraphEdge, GraphNode};
+use crate::model::types::{GraphEdge, GraphNode};
 
 pub trait GraphStore: Send + Sync {
     fn upsert_graph(&self, user_id: &str, session_id: &str, dag_id: &str, nodes: &[GraphNode], edges: &[GraphEdge]);
@@ -222,9 +222,9 @@ fn render_memgraph_edge_cypher(
 
 #[cfg(test)]
 mod tests {
-    use crate::graph_store::GraphStore;
+    use crate::graph::store::GraphStore;
     use super::{append_lines, render_memgraph_edge_cypher, render_memgraph_node_cypher, MemgraphStubStore};
-    use crate::types::{GraphEdge, GraphNode};
+    use crate::model::types::{GraphEdge, GraphNode};
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 

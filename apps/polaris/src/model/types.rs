@@ -1,10 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use crate::enrich::Enricher;
-use crate::graph_store::GraphStore;
-use crate::plato::PlatoEngine;
-use crate::store::MemoryStore;
+use crate::memory::enrich::Enricher;
+use crate::graph::store::GraphStore;
+use crate::plato::engine::PlatoEngine;
+use crate::memory::store::MemoryStore;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MemoryEntry {

@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::types::{ListQueryParams, MemoryEntry, SearchQuery, SearchQueryParams};
+use crate::model::types::{ListQueryParams, MemoryEntry, SearchQuery, SearchQueryParams};
 
 pub trait MemoryStore: Send + Sync {
     fn ingest(&self, entry: MemoryEntry);
@@ -557,7 +557,7 @@ mod tests {
         apply_rolling_reduce, dedup_keep_order, extract_hard_facts, filter_entries, InMemoryStore,
         MemoryStore, RocksDbStore, SearchQuery, parse_csv_terms,
     };
-    use crate::types::MemoryEntry;
+    use crate::model::types::MemoryEntry;
     use std::fs;
     use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};

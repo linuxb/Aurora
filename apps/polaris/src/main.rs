@@ -1,24 +1,25 @@
-mod enrich;
+mod api;
 mod graph;
-mod graph_store;
-mod handlers;
+mod memory;
+mod model;
 mod plato;
-mod store;
-mod types;
 
-use axum::{routing::{get, post}, Router};
+use axum::{
+    routing::{get, post},
+    Router,
+};
 use std::env;
 use std::net::SocketAddr;
 
-use handlers::{
+use api::handlers::{
     healthz, ingest_memory, list_memory, list_memory_recent, search_by_hint, search_memory,
     search_memory_graph,
 };
-use graph_store::build_graph_store_from_env;
-use enrich::build_enricher_from_env;
-use plato::PlatoEngine;
-use store::build_store_from_env;
-use types::AppState;
+use graph::store::build_graph_store_from_env;
+use memory::enrich::build_enricher_from_env;
+use memory::store::build_store_from_env;
+use model::types::AppState;
+use plato::engine::PlatoEngine;
 
 #[tokio::main]
 async fn main() {
