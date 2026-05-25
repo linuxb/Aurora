@@ -50,3 +50,8 @@
 - Implement real Memgraph MAGE/Leiden adapter call-down.
 - Replace rule-based macro summary template with async LLM map-reduce generation.
 - Add integration tests against real graph service.
+
+9. LLM-assisted enrichment backend
+- Design: LLM-based hard_facts/rels extraction and merge
+- Status: Implemented (HTTP backend baseline)
+- Notes: `llm_http` backend added with timeout/strict/fallback controls; can be used by Plato slow-path and ingest enrichment chain.

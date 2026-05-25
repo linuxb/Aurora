@@ -131,7 +131,15 @@
     - `ERROR_CODE=ERR_*` facts from `raw_output`
     - `A calls B` relation triples from `summary` when incoming `rels` is empty
   - enrichment now runs before final memory persist, then flows into graph upsert
-  - added unit test for rule-based enrichment behavior
+  - added unit test for rule-based enrichment behavior- Added real LLM-assisted enrichment backend (`llm_http`) for hard_facts/rels:
+  - backend key: `POLARIS_ENRICH_BACKEND=llm_http`
+  - endpoint: `POLARIS_ENRICH_LLM_ENDPOINT`
+  - timeout: `POLARIS_ENRICH_LLM_TIMEOUT_MS`
+  - strict mode: `POLARIS_ENRICH_LLM_STRICT`
+  - fallback-to-rule mode: `POLARIS_ENRICH_LLM_FALLBACK_RULE`
+  - merge strategy: dedup hard_facts + normalized rels, preserving graceful degradation on failure
+  - added unit tests for env parsing and response shape parsing
+
 - Implemented Plato GraphRAG baseline (Phase 4 core):
   - added `plato.rs` with `GraphAnalyticsAdapter` abstraction and default `PetgraphCommunityAdapter`
   - community detection baseline uses `petgraph::algo::kosaraju_scc` as local-first clustering engine
@@ -175,7 +183,6 @@
 - `go test ./...` in `apps/arqo` should pass with memory injection API tests.
 
 ## Pending in Phase 4
-- Add real LLM-assisted enrichment backend for `hard_facts/rels` on top of current `Enricher` interface.
 - Harden `memgraph_bolt` path to production level:
   - batch writes (transaction/chunk strategy) for high-throughput writes
   - circuit-breaker/fallback policy and write-failure observability
