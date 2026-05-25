@@ -117,6 +117,13 @@
   - verified local compile on macOS M2 via:
     - `cargo test` (default features)
     - `cargo test --features memgraph_bolt`
+  - added first hardening increment for `memgraph_bolt` runtime path:
+    - connection reuse with lazy cached graph client
+    - configurable timeout (`POLARIS_MEMGRAPH_TIMEOUT_MS`, default 1500)
+    - configurable retry (`POLARIS_MEMGRAPH_RETRIES`, default 2)
+    - configurable retry backoff (`POLARIS_MEMGRAPH_RETRY_BACKOFF_MS`, default 100)
+    - connection reset on failed attempt before retry
+  - verified compile+tests for both default and `memgraph_bolt` feature modes after hardening
 - Added pluggable enrichment hook for memory ingest path:
   - introduced `Enricher` abstraction and backend factory (`POLARIS_ENRICH_BACKEND`)
   - `none` backend keeps current behavior (default)
@@ -162,8 +169,8 @@
 ## Pending in Phase 4
 - Add real LLM-assisted enrichment backend for `hard_facts/rels` on top of current `Enricher` interface.
 - Harden `memgraph_bolt` path to production level:
-  - batch writes / connection reuse
-  - retry, timeout, and circuit-breaker/fallback policy
+  - batch writes (transaction/chunk strategy) for high-throughput writes
+  - circuit-breaker/fallback policy and write-failure observability
   - integration tests against real Memgraph docker service
 - Add Kuzu backend parity behind `GraphStore` interface for local-first graph option.
 - Upgrade Plato global summary generation from rule-based template to async LLM map-reduce pipeline.
