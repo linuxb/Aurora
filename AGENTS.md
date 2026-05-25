@@ -7,6 +7,7 @@
     - Intent-Router.md 意图路由模块，描述arqo如何从用户的Prompt分析意图，Skill注入拆解为DAG
     - System-Spec.md 一些协议Spec，模块之间的交互可以参考
     - Aurora-Architechure.md 系统整体架构描述。进行开发计划规划以及进度回顾需要参考。架构review必须参考
+    - Plato-GraphRAG.md GraphRAG子系统的详细设计，设计GraphRAG部份需参考
 - doc/progress 开发进度记录，研发时可以回顾之前开发内容。每次研发有一定进展需要补充信息到progress对应文档，比如完成了一些待办项要把progress文档对应的记录删除掉，避免后续重复开发
 - doc/review 架构/代码review输出报告的位置
   - logs 常规的code/architecture review记录

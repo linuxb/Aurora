@@ -125,6 +125,21 @@
     - `A calls B` relation triples from `summary` when incoming `rels` is empty
   - enrichment now runs before final memory persist, then flows into graph upsert
   - added unit test for rule-based enrichment behavior
+- Implemented Plato GraphRAG baseline (Phase 4 core):
+  - added `plato.rs` with `GraphAnalyticsAdapter` abstraction and default `PetgraphCommunityAdapter`
+  - community detection baseline uses `petgraph::algo::kosaraju_scc` as local-first clustering engine
+  - added threshold-triggered reclustering state machine:
+    - dirty edge counter (`PLATO_DIRTY_EDGE_THRESHOLD`, default 500)
+    - time trigger (`PLATO_CLUSTER_INTERVAL_SECONDS`, default 7200s)
+  - added macro memory generation baseline:
+    - build per-community `macro_summary` from top weighted nodes (`PLATO_COMMUNITY_TOPK`, default 10)
+    - store scoped community summaries by `user/session/dag`
+  - integrated `search_by_hint` routing with unified schema semantics:
+    - legacy `query_type=LOCAL|GLOBAL` mapping
+    - `GRAPH_LOCAL_TRAVERSAL` => local graph filter by keywords/query text
+    - `GRAPH_GLOBAL_SUMMARY` => return top community macro summaries
+  - ingest path now feeds Plato observe/recluster pipeline after graph extraction
+  - added Plato unit tests for local/global query behavior
 - Integrated `arqo -> polaris` mem_hint query path:
   - `PolarisMemoryClient` now supports `SearchByHint` (`POST /memory/search_by_hint`)
   - enabled via `ARQO_MEMORY_HINT_ENABLED=true`
@@ -143,3 +158,4 @@
   - retry, timeout, and circuit-breaker/fallback policy
   - integration tests against real Memgraph docker service
 - Add Kuzu backend parity behind `GraphStore` interface for local-first graph option.
+- Upgrade Plato global summary generation from rule-based template to async LLM map-reduce pipeline.

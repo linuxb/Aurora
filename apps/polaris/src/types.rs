@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use crate::enrich::Enricher;
 use crate::graph_store::GraphStore;
+use crate::plato::PlatoEngine;
 use crate::store::MemoryStore;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -32,6 +33,7 @@ pub struct AppState {
     pub store: Arc<dyn MemoryStore>,
     pub graph_store: Arc<dyn GraphStore>,
     pub enricher: Arc<dyn Enricher>,
+    pub plato: Arc<PlatoEngine>,
 }
 
 #[derive(Deserialize)]
@@ -67,9 +69,22 @@ pub struct ListQueryParams {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct MemHint {
+    pub version: Option<String>,
+    pub target_system: Option<String>,
+    pub query_type: Option<String>,
     pub strategy: Option<String>,
     pub target_step_id: Option<String>,
     pub semantic_query: Option<String>,
+    pub keywords: Option<Vec<String>>,
+    pub intent_question: Option<String>,
+    pub query: Option<MemHintQuery>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct MemHintQuery {
+    pub text: Option<String>,
+    pub keywords: Option<Vec<String>>,
+    pub target_task_id: Option<String>,
 }
 
 #[derive(Deserialize)]

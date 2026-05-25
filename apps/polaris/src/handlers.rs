@@ -129,6 +129,7 @@ pub async fn ingest_memory(
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
+    let dag_id = req.dag_id.clone().unwrap_or_else(|| "default".to_string());
     let summary = req.summary.clone().unwrap_or_default();
     let raw_output = req.raw_output.clone().unwrap_or_default();
     let mut hard_facts = req.hard_facts.clone().unwrap_or_default();
@@ -143,7 +144,7 @@ pub async fn ingest_memory(
     let entry = MemoryEntry {
         user_id: req.user_id,
         session_id: req.session_id,
-        dag_id: req.dag_id.unwrap_or_else(|| "default".to_string()),
+        dag_id: dag_id.clone(),
         task_id: task_id.clone(),
         raw_output,
         summary,
@@ -155,6 +156,12 @@ pub async fn ingest_memory(
     let final_entry = apply_rolling_reduce(&state.store, entry);
     state.store.ingest(final_entry.clone());
     let (nodes, edges) = build_entity_relation_graph(vec![final_entry.clone()]);
+    let scope_key = crate::plato::PlatoEngine::scope_key(
+        &final_entry.user_id,
+        &final_entry.session_id,
+        &final_entry.dag_id,
+    );
+    state.plato.observe_graph(&scope_key, &nodes, &edges);
     state.graph_store.upsert_graph(
         &final_entry.user_id,
         &final_entry.session_id,
@@ -190,15 +197,34 @@ pub async fn search_by_hint(
             .into_response();
     }
     let hint = req.mem_hint.unwrap_or(MemHint {
+        version: None,
+        target_system: None,
+        query_type: None,
         strategy: Some("NONE".to_string()),
         target_step_id: None,
         semantic_query: None,
+        keywords: None,
+        intent_question: None,
+        query: None,
     });
-    let semantic_query = hint.semantic_query.clone().unwrap_or_default();
+    let semantic_query = hint
+        .query
+        .as_ref()
+        .and_then(|q| q.text.clone())
+        .or(hint.semantic_query.clone())
+        .or(hint.intent_question.clone())
+        .unwrap_or_default();
+    let dag_id = req.dag_id.clone().unwrap_or_else(|| "default".to_string());
+    let keywords = hint
+        .query
+        .as_ref()
+        .and_then(|q| q.keywords.clone())
+        .or(hint.keywords.clone())
+        .unwrap_or_default();
     let base_query = SearchQuery {
         user_id: req.user_id.clone(),
         session_id: req.session_id.clone(),
-        dag_id: req.dag_id.unwrap_or_else(|| "default".to_string()),
+        dag_id: dag_id.clone(),
         q: semantic_query.clone(),
         limit: req.limit.unwrap_or(3),
     };
@@ -215,14 +241,15 @@ pub async fn search_by_hint(
             .into_response();
     }
 
-    match hint
-        .strategy
-        .unwrap_or_else(|| "NONE".to_string())
-        .to_uppercase()
-        .as_str()
-    {
+    let strategy = normalize_strategy(&hint);
+    match strategy.as_str() {
         "KV_POINT_GET" => {
-            let target_task_id = hint.target_step_id.unwrap_or_default();
+            let target_task_id = hint
+                .query
+                .as_ref()
+                .and_then(|q| q.target_task_id.clone())
+                .or(hint.target_step_id.clone())
+                .unwrap_or_default();
             if target_task_id.trim().is_empty() {
                 return (
                     StatusCode::BAD_REQUEST,
@@ -245,9 +272,20 @@ pub async fn search_by_hint(
             )
                 .into_response()
         }
-        "GRAPH_TRAVERSAL" => {
+        "GRAPH_LOCAL_TRAVERSAL" | "GRAPH_TRAVERSAL" => {
             let entries = state.store.search(&base_query);
             let (nodes, edges) = build_entity_relation_graph(entries.clone());
+            let (local_nodes, local_edges) =
+                state
+                    .plato
+                    .query_local(&nodes, &edges, &keywords, &semantic_query);
+            if !local_nodes.is_empty() {
+                return (
+                    StatusCode::OK,
+                    Json(json!({"route":"GRAPH_LOCAL_TRAVERSAL","node_count":local_nodes.len(),"edge_count":local_edges.len(),"nodes":local_nodes,"edges":local_edges})),
+                )
+                    .into_response();
+            }
             if !nodes.is_empty() {
                 return (
                     StatusCode::OK,
@@ -265,7 +303,30 @@ pub async fn search_by_hint(
                 .collect::<Vec<_>>();
             (
                 StatusCode::OK,
-                Json(json!({"route":"GRAPH_FALLBACK_SCAN","count":fallback_entries.len(),"entries":fallback_entries})),
+                Json(json!({"route":"GRAPH_LOCAL_FALLBACK_SCAN","count":fallback_entries.len(),"entries":fallback_entries})),
+            )
+                .into_response()
+        }
+        "GRAPH_GLOBAL_SUMMARY" => {
+            let entries = state.store.search(&base_query);
+            let (nodes, edges) = build_entity_relation_graph(entries.clone());
+            let scope_key = crate::plato::PlatoEngine::scope_key(
+                &req.user_id,
+                &req.session_id,
+                &dag_id,
+            );
+            state.plato.observe_graph(&scope_key, &nodes, &edges);
+            let summaries = state.plato.query_global(&scope_key, &semantic_query, &keywords, 3);
+            if !summaries.is_empty() {
+                return (
+                    StatusCode::OK,
+                    Json(json!({"route":"GRAPH_GLOBAL_SUMMARY","count":summaries.len(),"communities":summaries})),
+                )
+                    .into_response();
+            }
+            (
+                StatusCode::OK,
+                Json(json!({"route":"GRAPH_GLOBAL_EMPTY","count":0,"communities":[] })),
             )
                 .into_response()
         }
@@ -280,4 +341,27 @@ pub async fn search_by_hint(
                 .into_response()
         }
     }
+}
+
+fn normalize_strategy(hint: &MemHint) -> String {
+    let _schema_version = hint.version.clone().unwrap_or_else(|| "1.0".to_string());
+    let target_system = hint
+        .target_system
+        .clone()
+        .unwrap_or_else(|| "AUTO".to_string())
+        .to_uppercase();
+    if let Some(strategy) = hint.strategy.clone() {
+        return strategy.to_uppercase();
+    }
+    if let Some(query_type) = hint.query_type.clone() {
+        return match query_type.to_uppercase().as_str() {
+            "LOCAL" => "GRAPH_LOCAL_TRAVERSAL".to_string(),
+            "GLOBAL" => "GRAPH_GLOBAL_SUMMARY".to_string(),
+            _ => "NONE".to_string(),
+        };
+    }
+    if target_system == "PLATO_GRAPH" {
+        return "GRAPH_LOCAL_TRAVERSAL".to_string();
+    }
+    "NONE".to_string()
 }

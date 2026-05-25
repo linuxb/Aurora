@@ -2,6 +2,7 @@ mod enrich;
 mod graph;
 mod graph_store;
 mod handlers;
+mod plato;
 mod store;
 mod types;
 
@@ -15,6 +16,7 @@ use handlers::{
 };
 use graph_store::build_graph_store_from_env;
 use enrich::build_enricher_from_env;
+use plato::PlatoEngine;
 use store::build_store_from_env;
 use types::AppState;
 
@@ -27,6 +29,7 @@ async fn main() {
         store: build_store_from_env(),
         graph_store: build_graph_store_from_env(),
         enricher: build_enricher_from_env(),
+        plato: std::sync::Arc::new(PlatoEngine::new_default()),
     };
 
     let app = Router::new()

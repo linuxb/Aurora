@@ -114,6 +114,9 @@ mem_hint 是由大模型生成的“语义 CBO (Cost-Based Optimizer)”，用�
   }  
 }
 ```
+
+上述schema仅供说明设计原理，具体的schema参考doc/spec中文档定义。
+
 ### **5.2 Polaris 内部执行路由 (RBO + CBO 结合)**
 
 当 Polaris 接收到 Search(mem_hint) 请求时：

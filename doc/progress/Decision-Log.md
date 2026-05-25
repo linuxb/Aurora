@@ -185,3 +185,12 @@ This file records architecture and product decisions with traceability.
 - `owner`: user + assistant
 - `source`: conversation + `doc/progress/Phase-4-Progress.md`
 - `follow_up`: Implement real LLM-assisted enricher and add timeout/fallback policies.
+
+### 2026-05-25T23:55:00+08:00 | Phase 4 | Plato GraphRAG baseline integrated
+- `status`: decided
+- `decision`: Implement Plato local-first GraphRAG baseline with adapter abstraction, threshold-triggered clustering, and LOCAL/GLOBAL mem_hint query routing.
+- `context`: User requested prioritizing Plato as the core GraphRAG component in Phase 4 based on `Plato-GraphRAG.md`.
+- `impact`: Polaris now has executable Plato path for macro memory summaries and scoped local graph traversal, with backward-compatible mem_hint parsing.
+- `owner`: user + assistant
+- `source`: conversation + `doc/design/Plato-GraphRAG.md` + `doc/spec/Mem-Hint-Schema.md`
+- `follow_up`: Replace rule-based macro summary with async LLM map-reduce and harden graph backend integrations.
