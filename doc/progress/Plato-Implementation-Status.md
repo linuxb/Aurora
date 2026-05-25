@@ -1,7 +1,7 @@
 # Plato Implementation Status (Phase 4)
 
 ## Snapshot
-- Updated at: 2026-05-25
+- Updated at: 2026-05-26
 - Scope: `apps/polaris` Plato GraphRAG path
 
 ## Design-to-Implementation Matrix
@@ -29,7 +29,7 @@
 5. Async macro summary pipeline
 - Design: asynchronous slow-path with LLM map-reduce
 - Status: Partial
-- Notes: trigger and macro-summary state machine implemented; summary generation is rule-based template, not LLM pipeline yet.
+- Notes: background summary job worker is implemented; current summary backend is template-based, not LLM map-reduce yet.
 
 6. LOCAL query route
 - Design: anchor-based local traversal and micro facts return

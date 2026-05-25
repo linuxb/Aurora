@@ -4,7 +4,8 @@ use serde::Serialize;
 use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
 use std::env;
-use std::sync::Mutex;
+use std::sync::{mpsc, Arc, Mutex};
+use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::model::types::{GraphEdge, GraphNode};
@@ -107,7 +108,9 @@ struct ScopeState {
 pub struct PlatoEngine {
     adapter: Box<dyn GraphAnalyticsAdapter>,
     backend: PlatoAnalyticsBackend,
-    inner: Mutex<HashMap<String, ScopeState>>,
+    inner: Arc<Mutex<HashMap<String, ScopeState>>>,
+    summary_backend: String,
+    tx: mpsc::Sender<SummaryJob>,
 }
 
 impl PlatoEngine {
@@ -126,10 +129,18 @@ impl PlatoEngine {
             PlatoAnalyticsBackend::LocalLouvainApprox => Box::new(LouvainApproxAdapter),
             PlatoAnalyticsBackend::MemgraphMageStub => Box::new(MemgraphMageStubAdapter),
         };
+        let summary_backend = env::var("PLATO_SUMMARY_BACKEND")
+            .unwrap_or_else(|_| "template".to_string())
+            .to_lowercase();
+        let inner = Arc::new(Mutex::new(HashMap::new()));
+        let (tx, rx) = mpsc::channel::<SummaryJob>();
+        start_summary_worker(inner.clone(), rx, summary_backend.clone());
         Self {
             adapter,
             backend,
-            inner: Mutex::new(HashMap::new()),
+            inner,
+            summary_backend,
+            tx,
         }
     }
 
@@ -201,23 +212,28 @@ impl PlatoEngine {
                 .unwrap_or(10);
             let top = members.into_iter().take(top_k).collect::<Vec<_>>();
             let keywords = top.iter().map(|n| n.label.clone()).collect::<Vec<_>>();
-            let macro_summary = format!(
-                "Community {} focuses on [{}], dominant types: {}",
-                community_id,
-                keywords.join(", "),
-                summarize_types(&top)
-            );
+            let node_type_distribution = summarize_types(&top);
+            let node_count = top.len();
             state.communities.insert(
                 community_id.clone(),
                 CommunitySummary {
-                    community_id,
+                    community_id: community_id.clone(),
                     scope_key: scope_key.to_string(),
-                    macro_summary,
-                    keywords,
+                    macro_summary: "PENDING_SUMMARY".to_string(),
+                    keywords: keywords.clone(),
                     updated_at: now,
-                    node_count: top.len(),
+                    node_count,
                 },
             );
+            let _ = self.tx.send(SummaryJob {
+                scope_key: scope_key.to_string(),
+                community_id: community_id.clone(),
+                keywords: keywords.clone(),
+                node_type_distribution,
+                node_count,
+                backend: self.summary_backend.clone(),
+                updated_at: now,
+            });
         }
 
         state.last_clustered_at = now;
@@ -345,6 +361,52 @@ fn now_unix() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+#[derive(Clone, Debug)]
+struct SummaryJob {
+    scope_key: String,
+    community_id: String,
+    keywords: Vec<String>,
+    node_type_distribution: String,
+    node_count: usize,
+    backend: String,
+    updated_at: u64,
+}
+
+fn start_summary_worker(
+    inner: Arc<Mutex<HashMap<String, ScopeState>>>,
+    rx: mpsc::Receiver<SummaryJob>,
+    _backend: String,
+) {
+    thread::spawn(move || {
+        while let Ok(job) = rx.recv() {
+            let summary = render_macro_summary(&job);
+            if let Ok(mut guard) = inner.lock()
+                && let Some(scope) = guard.get_mut(&job.scope_key)
+                && let Some(community) = scope.communities.get_mut(&job.community_id)
+            {
+                community.macro_summary = summary;
+                community.updated_at = job.updated_at;
+            }
+        }
+    });
+}
+
+fn render_macro_summary(job: &SummaryJob) -> String {
+    if job.backend == "template" {
+        return format!(
+            "Community {} ({}) focuses on [{}], dominant types: {}",
+            job.community_id,
+            job.node_count,
+            job.keywords.join(", "),
+            job.node_type_distribution
+        );
+    }
+    format!(
+        "Community {} ({}) summary pending backend={}",
+        job.community_id, job.node_count, job.backend
+    )
 }
 
 #[cfg(test)]

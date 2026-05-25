@@ -151,6 +151,10 @@
     - `local_scc` (default, petgraph SCC partition)
     - `local_louvain_approx` (local-first Louvain-style approximation path)
     - `memgraph_mage_stub` (cloud adapter seam for future Leiden call-down)
+  - added async slow-path macro-summary worker baseline:
+    - community summaries are now generated through background job queue (`PENDING_SUMMARY` -> resolved summary)
+    - summary backend switch added (`PLATO_SUMMARY_BACKEND`, current default `template`)
+    - keeps ingestion critical path lightweight while preserving eventual macro memory refresh
 - Refactored Polaris Rust source layout into folder-based modules:
   - `api/` (`handlers`)
   - `memory/` (`store`, `enrich`)
@@ -178,4 +182,5 @@
   - integration tests against real Memgraph docker service
 - Add Kuzu backend parity behind `GraphStore` interface for local-first graph option.
 - Upgrade Plato global summary generation from rule-based template to async LLM map-reduce pipeline.
+- Upgrade async summary worker from template backend to real LLM map-reduce backend (with timeout/retry budget).
 - Replace `memgraph_mage_stub` with real Memgraph MAGE/Leiden call-down implementation and integration tests.
