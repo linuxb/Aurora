@@ -2,7 +2,7 @@
 
 ## 目标
 对齐本轮约束目标：
-- DAG 生成阶段仅允许两类节点：`SKILL_SINK` 与 `EXPAND_PLANNING`。
+- DAG 生成阶段仅允许两类节点：`skill` 与 `planner`。
 - 调度阶段禁止无限递归 JIT 扩图：当连续扩展 N 次后仍无法映射到可执行 skill，需向 UI 返回“缺少特定 skill”。
 
 ## 结论摘要
@@ -12,8 +12,8 @@
 ## 代码面核查
 
 ### 已满足
-1. NodeType 枚举化并收敛到 `SKILL_SINK` / `EXPAND_PLANNING`。
-2. `SUCCESS_AND_EXPAND` 仅允许在 `EXPAND_PLANNING` 节点触发。
+1. NodeType 枚举化并收敛到 `skill` / `planner`。
+2. `SUCCESS_AND_EXPAND` 仅允许在 `planner` 节点触发。
 3. MySQL 与内存 Store 在“仅扩图节点可扩图”上行为一致。
 
 ### 未满足（关键差距）
@@ -42,7 +42,7 @@
    - payload 带 `required_skill_hint`（若可推断）。
 
 ## 验收测试建议
-1. `EXPAND_PLANNING` 连续 3 次 `mapping_status=unmapped`，第 3 次触发 `ErrSkillMappingExhausted`。
+1. `planner` 连续 3 次 `mapping_status=unmapped`，第 3 次触发 `ErrSkillMappingExhausted`。
 2. 第 2 次 `unmapped` 后第 3 次 `mapped`，计数清零，后续不应误触发。
 3. MySQL/Memory 两套 backend 行为一致。
 4. API 返回包含 `code=missing_skill`，UI 可直接消费。

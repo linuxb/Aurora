@@ -6,7 +6,7 @@
 
 ## **1\. 基础设施适配器层设计 (Infra Adapter Layer)**
 
-为了实现“一套业务代码，两栖平滑运行”，Aurora 在底层的 Arqo（调度大脑）和 Polaris（记忆引擎）中引入了标准的 Adapter 模式。通过依赖注入（Dependency Injection），在启动时根据环境标量（ENV=cloud 或 ENV=local）加载不同的存储驱动。
+为了实现“一套业务代码，两栖平滑运行”，Aurora 在底层的 Arqo（调度大脑）和 Mem3（记忆引擎）中引入了标准的 Adapter 模式。通过依赖注入（Dependency Injection），在启动时根据环境标量（ENV=cloud 或 ENV=local）加载不同的存储驱动。
 
 ### **1.1 核心接口定义 (Core Interfaces)**
 

@@ -4,10 +4,10 @@
 - `2026-05-08T10:20:00+08:00`
 
 ## Scope of Current Increment
-- Start Memory/GraphRAG track with a usable memory ingest + retrieval baseline in `polaris`.
+- Start Memory/GraphRAG track with a usable memory ingest + retrieval baseline in `mem3`.
 
 ## Delivered in This Increment
-- Upgraded `polaris` ingest payload requirements:
+- Upgraded `mem3` ingest payload requirements:
   - now requires `user_id`, `session_id`, `task_id`, `summary`.
 - Added retrieval endpoint:
   - `GET /memory/search?user_id=...&session_id=...&q=...&limit=...`
@@ -19,26 +19,26 @@
 - Added unit tests:
   - ingest payload parsing with `user_id` requirement
   - search filtering for user-scope + limit behavior
-- Added `arqo -> polaris` retrieval integration on session planning:
-  - `arqo` optionally calls `polaris /memory/search` when `ARQO_POLARIS_URL` is configured
+- Added `arqo -> mem3` retrieval integration on session planning:
+  - `arqo` optionally calls `mem3 /memory/search` when `ARQO_MEM3_URL` is configured
   - memory hits are injected into planner `intent_context` as:
     - `memory_hits`
     - `memory_hit_count`
   - integration is best-effort and non-blocking for session creation
 - Added API test coverage for memory context injection in create-session response
-- Refactored `polaris` memory backend into explicit store abstraction:
+- Refactored `mem3` memory backend into explicit store abstraction:
   - introduced `MemoryStore` trait (`ingest/list_all/search`)
   - introduced `InMemoryStore` implementation behind `Arc<dyn MemoryStore>`
   - HTTP handlers now consume store interface instead of direct shared vector access
   - keeps current behavior stable while preparing for KV/graph-backed store implementations
-- Added multi-backend memory preparation in `polaris`:
-  - backend factory from env (`POLARIS_MEMORY_BACKEND`)
+- Added multi-backend memory preparation in `mem3`:
+  - backend factory from env (`MEM3_MEMORY_BACKEND`)
   - `memory` backend (default in-memory store)
-  - `file_md` backend with markdown persistence (`POLARIS_MEMORY_FS_DIR`)
+  - `file_md` backend with markdown persistence (`MEM3_MEMORY_FS_DIR`)
   - markdown entry format includes `user_id/session_id/task_id` header and summary body
   - added persistence+search test for `FileMarkdownStore`
 - Added `file_md` backend quality gates:
-  - retention/rotation by session (`POLARIS_MEMORY_FS_MAX_FILES_PER_SESSION`)
+  - retention/rotation by session (`MEM3_MEMORY_FS_MAX_FILES_PER_SESSION`)
   - concurrent-write protection with internal write mutex
   - corruption-tolerant markdown reads (broken files are skipped)
   - added tests for rotation and corruption tolerance
@@ -47,7 +47,7 @@
   - enforces `user_id` isolation via existing scoped memory search
   - builds lightweight co-occurrence graph (`nodes` + `edges`) from memory summaries
   - added graph-construction unit test
-- Replaced hand-rolled HTTP/JSON parsing in `polaris` with mainstream dependencies:
+- Replaced hand-rolled HTTP/JSON parsing in `mem3` with mainstream dependencies:
   - HTTP routing via `axum`
   - JSON encode/decode via `serde` / `serde_json`
   - entity token extraction via `regex`
@@ -57,20 +57,20 @@
   - infer relation types (`status_of`, `happened_at`, `executed_by`, fallback `co_occurs`)
   - preserve endpoint contract while improving semantics for downstream GraphRAG use
   - added unit assertions for typed nodes and typed relations
-- Added `arqo -> polaris` memory-query strategy controls:
+- Added `arqo -> mem3` memory-query strategy controls:
   - query rewrite policy via `ARQO_MEMORY_QUERY_REWRITE` (`none`/`trim`)
   - hit-ranking policy via `ARQO_MEMORY_HIT_RANK` (`none`/`short_first`/`long_first`)
-  - timeout policy via `ARQO_POLARIS_TIMEOUT_MS`
+  - timeout policy via `ARQO_MEM3_TIMEOUT_MS`
   - fallback policy via `ARQO_MEMORY_FALLBACK_STRICT` (strict fail vs best-effort empty)
   - default hit limit via `ARQO_MEMORY_HIT_LIMIT`
   - added unit tests for rewrite/ranking/fallback/config parsing
-- Refactored `polaris` into modules for maintainability:
+- Refactored `mem3` into modules for maintainability:
   - `types.rs`: shared request/response/domain structs
   - `store.rs`: memory store abstraction + file_md backend + rolling/hard_facts helpers
   - `graph.rs`: entity/relation extraction and graph assembly
   - `handlers.rs`: HTTP handler layer and mem_hint route logic
   - `main.rs`: router wiring/bootstrap only
-- Implemented Polaris-Mem core API semantics (Phase 4):
+- Implemented Mem3 core API semantics (Phase 4):
   - `POST /ingest` accepts `dag_id`, `task_id` (with `step_id` alias), `raw_output`, `summary`, `hard_facts`, `rels`
   - `GET /memory/list` supports recent window retrieval by `user_id/session_id/dag_id/limit`
   - `POST /memory/search_by_hint` supports `KV_POINT_GET` / `GRAPH_TRAVERSAL` / `NONE`
@@ -83,8 +83,8 @@
 - Added `rocksdb` Episodic Memory backend:
   - introduced `RocksDbStore` implementing `MemoryStore`
   - persisted `MemoryEntry` as JSON values keyed by `user_id:session_id:dag_id:observed_at:task_id`
-  - enabled via `POLARIS_MEMORY_BACKEND=rocksdb`
-  - storage path via `POLARIS_MEMORY_ROCKSDB_PATH` (default `/tmp/polaris-rocksdb`)
+  - enabled via `MEM3_MEMORY_BACKEND=rocksdb`
+  - storage path via `MEM3_MEMORY_ROCKSDB_PATH` (default `/tmp/mem3-rocksdb`)
   - added backend unit test for ingest+search parity
   - upgraded search path from full-table scan to prefix iterator:
     - key format normalized as `user_id:session_id:dag_id:observed_at(20-digit):task_id`
@@ -92,51 +92,51 @@
     - keeps recent-first semantics after scoped scan
   - added scoped+ordering test for rocksdb prefix retrieval
 - Added configurable extraction dictionaries (no code change required for term expansion):
-  - graph status-term dictionary via `POLARIS_GRAPH_STATUS_TERMS` (comma-separated)
-  - graph system-term dictionary via `POLARIS_GRAPH_SYSTEM_TERMS` (comma-separated)
-  - hard-facts error-signal dictionary via `POLARIS_HARD_FACT_ERROR_TERMS` (comma-separated)
+  - graph status-term dictionary via `MEM3_GRAPH_STATUS_TERMS` (comma-separated)
+  - graph system-term dictionary via `MEM3_GRAPH_SYSTEM_TERMS` (comma-separated)
+  - hard-facts error-signal dictionary via `MEM3_HARD_FACT_ERROR_TERMS` (comma-separated)
   - defaults are preserved and merged with custom terms
   - added unit tests for dictionary parsing merge behavior
 - Added graph backend adapter skeleton for Phase 4 extension:
-  - introduced `GraphStore` trait and backend factory (`POLARIS_GRAPH_BACKEND`)
+  - introduced `GraphStore` trait and backend factory (`MEM3_GRAPH_BACKEND`)
   - added `noop` backend (default) and `in_memory` backend as first pluggable target
   - ingestion path now performs graph upsert hook after memory ingest (`rels`-first extraction still preserved)
   - keeps current API behavior stable while preparing Memgraph/Kuzu adapters
 - Added Memgraph adapter stub for graph persistence parity:
-  - new `memgraph_stub` backend under `POLARIS_GRAPH_BACKEND`
+  - new `memgraph_stub` backend under `MEM3_GRAPH_BACKEND`
   - emits user-scoped Cypher statements for nodes/edges with `observed_at` timestamp
-  - writes Cypher to append-only log (`POLARIS_MEMGRAPH_STUB_LOG`, default `/tmp/polaris-memgraph.cypher.log`)
+  - writes Cypher to append-only log (`MEM3_MEMGRAPH_STUB_LOG`, default `/tmp/mem3-memgraph.cypher.log`)
   - validates bridge contract for future real Bolt/Memgraph adapter replacement
   - added unit tests for Cypher rendering and stub log persistence
 - Added optional real Memgraph Bolt backend (M2-friendly compile path):
   - introduced `neo4rs` as optional dependency
   - feature flag: `memgraph_bolt`
-  - backend key: `POLARIS_GRAPH_BACKEND=memgraph_bolt`
-  - runtime config: `POLARIS_MEMGRAPH_URI`, `POLARIS_MEMGRAPH_USER`, `POLARIS_MEMGRAPH_PASS`
+  - backend key: `MEM3_GRAPH_BACKEND=memgraph_bolt`
+  - runtime config: `MEM3_MEMGRAPH_URI`, `MEM3_MEMGRAPH_USER`, `MEM3_MEMGRAPH_PASS`
   - default build remains lightweight (feature disabled), preserving local compile/test stability
   - verified local compile on macOS M2 via:
     - `cargo test` (default features)
     - `cargo test --features memgraph_bolt`
   - added first hardening increment for `memgraph_bolt` runtime path:
     - connection reuse with lazy cached graph client
-    - configurable timeout (`POLARIS_MEMGRAPH_TIMEOUT_MS`, default 1500)
-    - configurable retry (`POLARIS_MEMGRAPH_RETRIES`, default 2)
-    - configurable retry backoff (`POLARIS_MEMGRAPH_RETRY_BACKOFF_MS`, default 100)
+    - configurable timeout (`MEM3_MEMGRAPH_TIMEOUT_MS`, default 1500)
+    - configurable retry (`MEM3_MEMGRAPH_RETRIES`, default 2)
+    - configurable retry backoff (`MEM3_MEMGRAPH_RETRY_BACKOFF_MS`, default 100)
     - connection reset on failed attempt before retry
   - verified compile+tests for both default and `memgraph_bolt` feature modes after hardening
 - Added pluggable enrichment hook for memory ingest path:
-  - introduced `Enricher` abstraction and backend factory (`POLARIS_ENRICH_BACKEND`)
+  - introduced `Enricher` abstraction and backend factory (`MEM3_ENRICH_BACKEND`)
   - `none` backend keeps current behavior (default)
   - `rule_based` backend extracts:
     - `ERROR_CODE=ERR_*` facts from `raw_output`
     - `A calls B` relation triples from `summary` when incoming `rels` is empty
   - enrichment now runs before final memory persist, then flows into graph upsert
   - added unit test for rule-based enrichment behavior- Added real LLM-assisted enrichment backend (`llm_http`) for hard_facts/rels:
-  - backend key: `POLARIS_ENRICH_BACKEND=llm_http`
-  - endpoint: `POLARIS_ENRICH_LLM_ENDPOINT`
-  - timeout: `POLARIS_ENRICH_LLM_TIMEOUT_MS`
-  - strict mode: `POLARIS_ENRICH_LLM_STRICT`
-  - fallback-to-rule mode: `POLARIS_ENRICH_LLM_FALLBACK_RULE`
+  - backend key: `MEM3_ENRICH_BACKEND=llm_http`
+  - endpoint: `MEM3_ENRICH_LLM_ENDPOINT`
+  - timeout: `MEM3_ENRICH_LLM_TIMEOUT_MS`
+  - strict mode: `MEM3_ENRICH_LLM_STRICT`
+  - fallback-to-rule mode: `MEM3_ENRICH_LLM_FALLBACK_RULE`
   - merge strategy: dedup hard_facts + normalized rels, preserving graceful degradation on failure
   - added unit tests for env parsing and response shape parsing
 
@@ -163,7 +163,7 @@
     - community summaries are now generated through background job queue (`PENDING_SUMMARY` -> resolved summary)
     - summary backend switch added (`PLATO_SUMMARY_BACKEND`, current default `template`)
     - keeps ingestion critical path lightweight while preserving eventual macro memory refresh
-- Refactored Polaris Rust source layout into folder-based modules:
+- Refactored Mem3 Rust source layout into folder-based modules:
   - `api/` (`handlers`)
   - `memory/` (`store`, `enrich`)
   - `graph/` (`extractor`, `store`)
@@ -171,15 +171,15 @@
   - `model/` (`types`)
   - updated imports/module wiring in `main.rs` without behavior change
   - verified full test pass after refactor
-- Integrated `arqo -> polaris` mem_hint query path:
-  - `PolarisMemoryClient` now supports `SearchByHint` (`POST /memory/search_by_hint`)
+- Integrated `arqo -> mem3` mem_hint query path:
+  - `Mem3MemoryClient` now supports `SearchByHint` (`POST /memory/search_by_hint`)
   - enabled via `ARQO_MEMORY_HINT_ENABLED=true`
   - strategy inference baseline: relation/dependency/impact => `GRAPH_TRAVERSAL`, task/step mention => `KV_POINT_GET`, otherwise `NONE`
   - `createSession` now tries hint-based retrieval first, then falls back to legacy `/memory/search`
   - added unit tests for hint request payload + strategy inference
 
 ## Verification
-- `cargo test` in `apps/polaris` should pass with new memory retrieval tests.
+- `cargo test` in `apps/mem3` should pass with new memory retrieval tests.
 - `go test ./...` in `apps/arqo` should pass with memory injection API tests.
 
 ## Pending in Phase 4

@@ -25,7 +25,7 @@
 - 搭建可运行的三语言最小框架：
   - `arqo`（Go）: 网关与 DAG 状态机核心
   - `worker-ts`（TS）: Skill 执行与语义化错误
-  - `polaris`（Rust）: 记忆控制器最小服务
+  - `mem3`（Rust）: 记忆控制器最小服务
 - 落地最小协议：
   - Task 状态流转：`PENDING -> READY -> RUNNING -> SUCCESS/FAILED`
   - Skill 双轨返回：`raw_data` + `summary`
@@ -35,11 +35,11 @@
 ### 可用功能
 - 通过 `POST /v1/sessions` 创建 session 并自动生成 demo DAG
 - `worker-ts` 自动 pull/execute/complete Task
-- `polaris` 提供 `healthz` 与 `ingest/memory` 最小接口
+- `mem3` 提供 `healthz` 与 `ingest/memory` 最小接口
 
 ### 可测试性
 - `go test ./...`：校验核心 DAG 流转与失败重规划状态变迁
-- `cargo test`：校验 polaris ingest 解析
+- `cargo test`：校验 mem3 ingest 解析
 - 手工联调：curl 建 session，观察任务从 READY 到 SUCCESS
 
 ### 验收标准
@@ -112,7 +112,7 @@
 ## Phase 4: Memory 与 GraphRAG
 
 ### 研发目标
-- `polaris` 从最小服务升级为异步 memory pipeline
+- `mem3` 从最小服务升级为异步 memory pipeline
 - 接入 KV（raw_data）和 GraphDB（summary/实体关系）
 - 提供内部 `SearchMemoryGraph` 安全查询接口
 
@@ -129,11 +129,11 @@
 - 跨 session 记忆召回可用
 - 无跨租户数据泄漏
 
-## Phase 4.5: Local-Engine 最小原型（在 Polaris 完成后立即启动）
+## Phase 4.5: Local-Engine 最小原型（在 Mem3 完成后立即启动）
 
 ### 研发目标
 - 在保持 cloud 主干推进的前提下，提前启动本地化最小原型（Local-First）。
-- 基于现有 `arqo + polaris` 能力，验证本地单机可运行闭环。
+- 基于现有 `arqo + mem3` 能力，验证本地单机可运行闭环。
 - 固化本地化关键接口与执行协议，降低后续 Phase 6 风险。
 
 ### 可用功能

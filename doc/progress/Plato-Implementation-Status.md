@@ -2,7 +2,7 @@
 
 ## Snapshot
 - Updated at: 2026-05-26
-- Scope: `apps/polaris` Plato GraphRAG path
+- Scope: `apps/mem3` Plato GraphRAG path
 
 ## Design-to-Implementation Matrix
 
@@ -42,7 +42,7 @@
 - Notes: Top-K community summaries returned; currently lexical scoring baseline.
 
 8. Unified mem_hint compatibility
-- Design: compatible with Polaris + Plato schema
+- Design: compatible with Mem3 + Plato schema
 - Status: Implemented
 - Notes: supports legacy `query_type=LOCAL|GLOBAL` and unified `strategy` forms.
 

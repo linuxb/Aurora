@@ -1,13 +1,13 @@
-# Unified Mem Hint Schema (Polaris + Plato)
+# Unified Mem Hint Schema (Mem3 + Plato)
 
 ## Goal
 This spec unifies `mem_hint` across:
-- `doc/design/Polaris-Mem.md` (KV_POINT_GET / GRAPH_TRAVERSAL / NONE)
+- `doc/design/Mem3.md` (KV_POINT_GET / GRAPH_TRAVERSAL / NONE)
 - `doc/design/Plato-GraphRAG.md` (PLATO graph `LOCAL` / `GLOBAL`)
 
 Design principles:
 - One schema for planner constrained decoding.
-- Backward-compatible with existing Polaris fields.
+- Backward-compatible with existing Mem3 fields.
 - Explicit routing intent for KV vs Graph vs Plato global summaries.
 
 ## Key Field Design Intent
@@ -18,7 +18,7 @@ Design principles:
 - **Can be omitted?**: Not recommended. In this unified schema it is required.
 
 ### `target_system`
-- **Intent**: Constrain execution backend (`POLARIS_KV` vs `PLATO_GRAPH`) when business logic requires it.
+- **Intent**: Constrain execution backend (`MEM3_KV` vs `PLATO_GRAPH`) when business logic requires it.
 - **Why needed**: Same `strategy` may map to multiple physical paths in mixed deployments.
 - **Can be omitted?**: Yes. `AUTO` works for most cases.
 
@@ -31,10 +31,10 @@ Design principles:
 - **Can be omitted?**:
   - depends on `strategy` (`KV_POINT_GET` requires `target_task_id`, graph paths require `text` or `keywords`).
 
-### `scope`
-- **Intent**: Enforce tenant and execution-boundary isolation (`user/session/dag/time_range`).
-- **Why needed**: Prevent cross-tenant leakage and reduce search cost/noise.
-- **Can be omitted?**: Partially. `user_id` at execution boundary should still be mandatory.
+### Security scope
+- `mem_hint` 不携带 Tenant/Agent/Session/DAG 安全边界。
+- 安全作用域由 Arqo 从可信 Task 元数据写入 `Mem3SearchRequest.scope`，不能接受 LLM 覆盖。
+- 时间范围属于检索语义，因此保留在 `query.time_range` 中。
 
 ### `planner_intent`
 - **Intent**: Encode planner-side optimization preference (latency, cost, freshness), not just retrieval target.
@@ -65,17 +65,12 @@ Design principles:
 {
   "mem_hint": {
     "version": "1.0",
-    "target_system": "AUTO | POLARIS_KV | PLATO_GRAPH",
+    "target_system": "AUTO | MEM3_KV | PLATO_GRAPH",
     "strategy": "NONE | KV_POINT_GET | GRAPH_LOCAL_TRAVERSAL | GRAPH_GLOBAL_SUMMARY",
     "query": {
       "text": "string",
       "keywords": ["string"],
-      "target_task_id": "string"
-    },
-    "scope": {
-      "user_id": "string",
-      "session_id": "string",
-      "dag_id": "string",
+      "target_task_id": "string",
       "time_range": {
         "from": "RFC3339 datetime",
         "to": "RFC3339 datetime"
@@ -118,7 +113,7 @@ Design principles:
         "version": { "type": "string", "const": "1.0" },
         "target_system": {
           "type": "string",
-          "enum": ["AUTO", "POLARIS_KV", "PLATO_GRAPH"],
+          "enum": ["AUTO", "MEM3_KV", "PLATO_GRAPH"],
           "default": "AUTO"
         },
         "strategy": {
@@ -140,16 +135,7 @@ Design principles:
               "items": { "type": "string", "minLength": 1 },
               "maxItems": 16
             },
-            "target_task_id": { "type": "string", "minLength": 1 }
-          }
-        },
-        "scope": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "user_id": { "type": "string", "minLength": 1 },
-            "session_id": { "type": "string", "minLength": 1 },
-            "dag_id": { "type": "string", "minLength": 1 },
+            "target_task_id": { "type": "string", "minLength": 1 },
             "time_range": {
               "type": "object",
               "additionalProperties": false,
@@ -199,7 +185,7 @@ Design principles:
             "required": ["query"],
             "properties": {
               "query": { "required": ["target_task_id"] },
-              "target_system": { "enum": ["AUTO", "POLARIS_KV"] }
+              "target_system": { "enum": ["AUTO", "MEM3_KV"] }
             }
           }
         },
@@ -237,26 +223,26 @@ Design principles:
 ## Routing Mapping
 
 - `NONE`
-  - RBO: recent window (`List`) first.
+  - No directed retrieval; Search still returns mandatory last-N outputs and latest rolling summary.
 - `KV_POINT_GET`
-  - Polaris KV exact fetch by `target_task_id`.
+  - Mem3 KV exact fetch by `target_task_id`.
 - `GRAPH_LOCAL_TRAVERSAL`
   - Plato local graph walk (1~2 hop by keyword/text anchors).
 - `GRAPH_GLOBAL_SUMMARY`
   - Plato community-level summary retrieval (global/map-reduce style).
 
-## Polaris Interpretation and Execution Rules
+## Mem3 Interpretation and Execution Rules
 
-This section defines how Polaris should interpret `mem_hint` fields and make routing decisions deterministically.
+This section defines how Mem3 should interpret `mem_hint` fields and make routing decisions deterministically.
 
 ### 1. Field Priority (from high to low)
 
 1. `strategy` (hard routing intent)
 2. `target_system` (backend constraint)
-3. `scope` (isolation/range constraints)
+3. trusted `Mem3SearchRequest.scope` (injected by Arqo, not generated by LLM)
 4. `planner_intent` (latency/cost/freshness preference)
 5. `fallback` (degrade path)
-6. `query` (`text/keywords/target_task_id`)
+6. `query` (`text/keywords/target_task_id/time_range`)
 
 If fields conflict, higher-priority fields win.
 
@@ -273,13 +259,13 @@ If missing:
 ### 3. Strategy-Level Behavior
 
 #### `NONE`
-- Run RBO shortcut first:
-  - if `prefer_freshness=true`, call recent window list in `scope` (`session_id/dag_id`) with small `limit` (e.g., 3~5).
-- If empty and fallback allowed, execute fallback chain.
+- Do not execute additional directed retrieval.
+- Mem3 Search still returns the mandatory working memory assembled from last-N outputs and the latest rolling summary.
+- `fallback` is ignored because there is no directed primary retrieval to degrade.
 
 #### `KV_POINT_GET`
 - Required: `query.target_task_id`.
-- Route to Polaris KV exact lookup.
+- Route to Mem3 KV exact lookup.
 - If `target_system=PLATO_GRAPH`, ignore and treat as `AUTO` + `KV_POINT_GET` (KV still wins for exact id).
 - If miss and fallback allowed, execute fallback chain.
 
@@ -287,7 +273,7 @@ If missing:
 - Required: `query.text` or `query.keywords`.
 - Preferred backend: `PLATO_GRAPH` (or `AUTO` that resolves to graph availability).
 - Use `keywords` as anchors; `text` as semantic supplement.
-- Apply `scope.user_id` hard isolation.
+- Apply trusted `Mem3SearchRequest.scope.tenant_id` hard isolation and optional Agent/Session/DAG filters.
 - If graph result empty and fallback allowed, run `KV_FULLTEXT` first.
 
 #### `GRAPH_GLOBAL_SUMMARY`
@@ -299,19 +285,20 @@ If missing:
 
 ### 4. `target_system` Resolution
 
-- `POLARIS_KV`: disallow graph primary route; graph strategies degrade to KV fallback route.
+- `MEM3_KV`: disallow graph primary route; graph strategies degrade to KV fallback route.
 - `PLATO_GRAPH`: graph strategies remain primary; `KV_POINT_GET` is allowed only as fallback.
 - `AUTO`: choose backend by strategy:
   - `KV_POINT_GET` => KV
   - `GRAPH_LOCAL_TRAVERSAL` / `GRAPH_GLOBAL_SUMMARY` => Graph first, then fallback
   - `NONE` => RBO recent window then fallback
 
-### 5. Scope Enforcement
+### 5. Trusted Scope Enforcement
 
-Polaris must enforce:
-- `user_id` tenant isolation always required at execution boundary.
-- `session_id`/`dag_id` if provided must be applied to both KV and graph filters.
-- `time_range` (if provided) should be translated:
+Mem3 must enforce:
+- `tenant_id` is always required at the execution boundary.
+- `agent_id`, `session_id` and `dag_id` from `Mem3SearchRequest.scope` must be applied to KV and Graph filters where relevant.
+- LLM-generated `mem_hint` cannot add, remove or override those boundaries.
+- `query.time_range` (if provided) should be translated:
   - KV: filter by `observed_at`
   - Graph: filter edge/node observation timestamp.
 
@@ -338,30 +325,38 @@ Polaris must enforce:
 ### 8. Deterministic Pseudocode
 
 ```python
-validate(mem_hint)
+validate(search_request)
 normalize_defaults(mem_hint)
-apply_scope_guard(user_id required)
+apply_scope_guard(search_request.scope.tenant_id required)
 
 route = decide_primary_route(strategy, target_system, planner_intent)
-result = execute(route, query, scope, planner_intent)
+working_memory = list_recent_outputs_and_latest_summary(
+  search_request.scope,
+  search_request.recent_limit
+)
+
+if strategy == NONE:
+  return working_memory + empty_retrieval
+
+result = execute(route, query, search_request.scope, planner_intent)
 
 if result not empty:
-  return result
+  return working_memory + result
 
 if fallback.allow_fallback != true:
   return empty_or_error
 
 for op in fallback.fallback_order:
-  candidate = execute(op, query, scope, planner_intent)
+  candidate = execute(op, query, search_request.scope, planner_intent)
   if candidate not empty:
-    return candidate
+    return working_memory + candidate
 
-return empty
+return working_memory + empty_retrieval
 ```
 
 ## Backward Compatibility Mapping
 
-### Legacy Polaris-Mem -> Unified
+### Legacy Mem3 Schema -> Unified
 - `strategy=KV_POINT_GET` -> same
 - `strategy=GRAPH_TRAVERSAL` -> `GRAPH_LOCAL_TRAVERSAL`
 - `target_step_id` -> `query.target_task_id`
@@ -381,7 +376,7 @@ return empty
 {
   "mem_hint": {
     "version": "1.0",
-    "target_system": "POLARIS_KV",
+    "target_system": "MEM3_KV",
     "strategy": "KV_POINT_GET",
     "query": {
       "target_task_id": "task_123"

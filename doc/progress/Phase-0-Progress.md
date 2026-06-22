@@ -5,7 +5,7 @@
 - `completed_at`: `2026-04-18T18:30:00+08:00`
 
 ## 目标
-- 搭建可运行的最小多语言框架：`arqo` + `worker-ts` + `polaris`
+- 搭建可运行的最小多语言框架：`arqo` + `worker-ts` + `mem3`
 - 完成核心状态流转与最小可测单元
 - 完成本地开发工具链与 IDE 调试配置
 
@@ -18,7 +18,7 @@
   - demo skills
   - dual-track skill response (`raw_data` + `summary`)
   - semantic error model (`AuroraSkillError`)
-- Rust `polaris`:
+- Rust `mem3`:
   - `GET /healthz`
   - `POST /ingest`
   - `GET /memory`

@@ -90,8 +90,8 @@
 ```
 
 ## 5. Node Type Semantics
-- `SKILL_SINK`: must map to concrete skill execution.
-- `EXPAND_PLANNING`: invokes predefined planner skill; may emit expansion payload.
+- `skill`: must map to concrete skill execution.
+- `planner`: invokes the predefined planning capability and may emit an expansion payload.
 
 ## 6. Security Baseline
 - Default deny network.

@@ -32,7 +32,7 @@ This file records architecture and product decisions with traceability.
 - `impact`: Simplifies local setup and aligns with current docker-compose.
 - `owner`: user
 - `source`: `doc/progress/Phase-0-Progress.md`
-- `follow_up`: Add Memgraph integration in `polaris` Phase 4.
+- `follow_up`: Add Memgraph integration in `mem3` Phase 4.
 
 ### 2026-04-18T18:17:00+08:00 | Phase 0 | Replanning capability scope
 - `status`: decided
@@ -135,16 +135,16 @@ This file records architecture and product decisions with traceability.
 
 ### 2026-05-08T10:20:00+08:00 | Phase 4 | Memory retrieval first increment
 - `status`: decided
-- `decision`: Start Phase 4 with a practical `polaris` memory retrieval baseline (`ingest + search`) before graph extraction complexity.
+- `decision`: Start Phase 4 with a practical `mem3` memory retrieval baseline (`ingest + search`) before graph extraction complexity.
 - `context`: Phase 3 core path is delivered; Phase 4 should begin with runnable, testable memory access.
 - `impact`: Establishes user-scoped memory query interface required by later GraphRAG and planner context injection.
 - `owner`: user + assistant
 - `source`: conversation + `doc/progress/Phase-4-Progress.md`
-- `follow_up`: Integrate `arqo -> polaris` retrieval path in next increment.
+- `follow_up`: Integrate `arqo -> mem3` retrieval path in next increment.
 
 ### 2026-05-09T10:50:00+08:00 | Phase 4 | Prefer mature dependencies and configurable memory query strategy
 - `status`: decided
-- `decision`: Replace custom HTTP parsing path in `polaris` with `axum/serde` and complete `arqo` memory-query controls (rewrite/rank/timeout/fallback).
+- `decision`: Replace custom HTTP parsing path in `mem3` with `axum/serde` and complete `arqo` memory-query controls (rewrite/rank/timeout/fallback).
 - `context`: User requested avoiding wheel reinvention and prioritizing mainstream third-party packages for stable delivery speed.
 - `impact`: Reduces parser maintenance risk, standardizes protocol handling, and makes retrieval behavior tunable by environment without code changes.
 - `owner`: user + assistant
@@ -152,20 +152,20 @@ This file records architecture and product decisions with traceability.
 - `follow_up`: Continue Phase 4 mainline, then upgrade graph extraction quality from regex baseline.
 ### 2026-05-09T11:20:00+08:00 | Phase 4 | Schema-guided graph typing baseline
 - `status`: decided
-- `decision`: Upgrade `polaris` graph extraction from flat co-occurrence to schema-guided typed entities and typed relations.
+- `decision`: Upgrade `mem3` graph extraction from flat co-occurrence to schema-guided typed entities and typed relations.
 - `context`: Phase 4 pending item required better graph semantics while keeping implementation lightweight and testable.
 - `impact`: Memory graph output now carries stronger structure for later GraphRAG ranking and planner context usage.
 - `owner`: user + assistant
 - `source`: conversation + `doc/progress/Phase-4-Progress.md`
 - `follow_up`: Add configurable extraction dictionary and optional LLM-assisted enrichment path.
 
-### 2026-05-11T23:55:00+08:00 | Phase 4 | Polaris-Mem modularization and API alignment
+### 2026-05-11T23:55:00+08:00 | Phase 4 | Mem3 modularization and API alignment
 - `status`: decided
-- `decision`: Refactor `polaris` into module boundaries and align memory API to `Polaris-Mem.md` (`ingest/list/search_by_hint`) while enforcing `step_id` as alias of `task_id`.
+- `decision`: Refactor `mem3` into module boundaries and align memory API to `Mem3.md` (`ingest/list/search_by_hint`) while enforcing `step_id` as alias of `task_id`.
 - `context`: User requested maintainable module design and confirmed `step_id` equals `arqo` `task_id`.
-- `impact`: Reduced single-file complexity, clearer extension points for future graph backend adapters, and stronger contract consistency between Arqo and Polaris.
+- `impact`: Reduced single-file complexity, clearer extension points for future graph backend adapters, and stronger contract consistency between Arqo and Mem3.
 - `owner`: user + assistant
-- `source`: conversation + `doc/design/Polaris-Mem.md` + `doc/progress/Phase-4-Progress.md`
+- `source`: conversation + `doc/design/Mem3.md` + `doc/progress/Phase-4-Progress.md`
 - `follow_up`: Add graph backend adapter parity and configurable extraction dictionary.
 
 ### 2026-05-12T10:20:00+08:00 | Phase 4 | Memgraph stub adapter as persistence bridge
@@ -179,7 +179,7 @@ This file records architecture and product decisions with traceability.
 
 ### 2026-05-12T10:45:00+08:00 | Phase 4 | Enricher plugin point before persistence
 - `status`: decided
-- `decision`: Add pluggable `Enricher` layer (`none` / `rule_based`) in Polaris ingest pipeline before memory+graph persistence.
+- `decision`: Add pluggable `Enricher` layer (`none` / `rule_based`) in Mem3 ingest pipeline before memory+graph persistence.
 - `context`: Need to keep mainline runnable now while creating clean seam for future LLM reduce/enrichment integration.
 - `impact`: Enables incremental extraction quality improvements without changing API contracts; future LLM backend can be introduced with minimal handler/store churn.
 - `owner`: user + assistant
@@ -190,7 +190,7 @@ This file records architecture and product decisions with traceability.
 - `status`: decided
 - `decision`: Implement Plato local-first GraphRAG baseline with adapter abstraction, threshold-triggered clustering, and LOCAL/GLOBAL mem_hint query routing.
 - `context`: User requested prioritizing Plato as the core GraphRAG component in Phase 4 based on `Plato-GraphRAG.md`.
-- `impact`: Polaris now has executable Plato path for macro memory summaries and scoped local graph traversal, with backward-compatible mem_hint parsing.
+- `impact`: Mem3 now has executable Plato path for macro memory summaries and scoped local graph traversal, with backward-compatible mem_hint parsing.
 - `owner`: user + assistant
 - `source`: conversation + `doc/design/Plato-GraphRAG.md` + `doc/spec/Mem-Hint-Schema.md`
 - `follow_up`: Replace rule-based macro summary with async LLM map-reduce and harden graph backend integrations.

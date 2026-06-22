@@ -1,7 +1,7 @@
 # Local Dev Debug Setup (macOS + Docker dependencies)
 
 This setup is optimized for local development on macOS:
-- Run Aurora services (`arqo`, `worker-ts`, `polaris`) directly on host for debugger support.
+- Run Aurora services (`arqo`, `worker-ts`, `mem3`) directly on host for debugger support.
 - Run dependency services in Docker (`mysql`, `redis`, `kvrocks`, `memgraph`).
 
 ## Compose files
@@ -41,7 +41,7 @@ Terminal 3:
 
 ```bash
 cd /Users/linzhenbin/workspace/my_proj/aurora
-make run-polaris
+make run-mem3
 ```
 
 ## Shutdown
