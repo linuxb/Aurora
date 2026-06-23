@@ -1,15 +1,21 @@
 package planner
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
 
-import "aurora/apps/arqo/internal/model"
+	"aurora/apps/arqo/internal/model"
+	"aurora/apps/arqo/internal/scheduler"
+)
 
 type Node struct {
-	NodeID       string         `json:"node_id"`
-	NodeType     model.NodeType `json:"node_type"`
-	SkillName    string         `json:"skill_name"`
-	Parameters   map[string]any `json:"parameters,omitempty"`
-	Dependencies []string       `json:"dependencies"`
+	NodeID       string            `json:"node_id"`
+	NodeType     model.NodeType    `json:"node_type"`
+	SkillName    string            `json:"skill_name,omitempty"`
+	Goal         string            `json:"goal,omitempty"`
+	MemHint      scheduler.MemHint `json:"mem_hint"`
+	Parameters   map[string]any    `json:"parameters,omitempty"`
+	Dependencies []string          `json:"dependencies"`
 }
 
 type ValidationErrorCode string
@@ -20,6 +26,8 @@ const (
 	ValidationErrMissingNodeType  ValidationErrorCode = "MISSING_NODE_TYPE"
 	ValidationErrInvalidNodeType  ValidationErrorCode = "INVALID_NODE_TYPE"
 	ValidationErrMissingSkillName ValidationErrorCode = "MISSING_SKILL_NAME"
+	ValidationErrMissingGoal      ValidationErrorCode = "MISSING_GOAL"
+	ValidationErrInvalidMemHint   ValidationErrorCode = "INVALID_MEM_HINT"
 	ValidationErrInvalidNodeSkill ValidationErrorCode = "INVALID_NODE_SKILL"
 	ValidationErrDanglingDep      ValidationErrorCode = "DANGLING_DEPENDENCY"
 	ValidationErrSelfDependency   ValidationErrorCode = "SELF_DEPENDENCY"
@@ -86,32 +94,50 @@ func ValidateDAG(nodes []Node) ValidationResult {
 			continue
 		}
 		node.NodeType = parsedNodeType
-		if node.NodeType == model.NodeTypeSkillSink {
+		if node.NodeType == model.NodeTypeSkill {
 			if node.SkillName == "" {
 				result.Valid = false
 				result.Errors = append(result.Errors, ValidationError{
 					Code:   ValidationErrMissingSkillName,
 					NodeID: node.NodeID,
-					Detail: "skill_name is required for skill sink node",
+					Detail: "skill_name is required for skill node",
 				})
 				continue
 			}
 		}
-		if node.NodeType == model.NodeTypeExpandPlanning && node.SkillName != "" && node.SkillName != "ReActPlanner" {
+		if node.NodeType == model.NodeTypePlanner && strings.TrimSpace(node.Goal) == "" {
 			result.Valid = false
 			result.Errors = append(result.Errors, ValidationError{
-				Code:   ValidationErrInvalidNodeSkill,
+				Code:   ValidationErrMissingGoal,
 				NodeID: node.NodeID,
-				Detail: "expanding node must use ReActPlanner skill when skill_name is provided",
+				Detail: "goal is required for planner node",
 			})
 			continue
 		}
-		if node.NodeType == model.NodeTypeSkillSink && node.SkillName == "ReActPlanner" {
+		if node.NodeType == model.NodeTypePlanner && node.SkillName != "" && node.SkillName != "ReActPlanner" {
 			result.Valid = false
 			result.Errors = append(result.Errors, ValidationError{
 				Code:   ValidationErrInvalidNodeSkill,
 				NodeID: node.NodeID,
-				Detail: "ReActPlanner must be declared as EXPAND_PLANNING node",
+				Detail: "planner node must use ReActPlanner skill when skill_name is provided",
+			})
+			continue
+		}
+		if node.NodeType == model.NodeTypeSkill && node.SkillName == "ReActPlanner" {
+			result.Valid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Code:   ValidationErrInvalidNodeSkill,
+				NodeID: node.NodeID,
+				Detail: "ReActPlanner must be declared as planner node",
+			})
+			continue
+		}
+		if err := scheduler.ValidateMemHint(&node.MemHint); err != nil {
+			result.Valid = false
+			result.Errors = append(result.Errors, ValidationError{
+				Code:   ValidationErrInvalidMemHint,
+				NodeID: node.NodeID,
+				Detail: err.Error(),
 			})
 			continue
 		}

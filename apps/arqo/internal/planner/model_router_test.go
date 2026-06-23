@@ -35,7 +35,7 @@ func TestModelRouterPlanSuccess(t *testing.T) {
 					StatusCode: http.StatusOK,
 					Header:     http.Header{"Content-Type": []string{"application/json"}},
 					Body: io.NopCloser(strings.NewReader(
-						`{"plan":{"source":"model","nodes":[{"node_id":"n1","node_type":"SKILL_SINK","skill_name":"QueryLog","dependencies":[]},{"node_id":"n2","node_type":"SKILL_SINK","skill_name":"SendEmail","dependencies":["n1"]}],"intent_context":{"from":"model"}}}`,
+						`{"plan":{"source":"model","nodes":[{"node_id":"n1","node_type":"skill","skill_name":"QueryLog","mem_hint":{"version":"1.0","strategy":"NONE"},"dependencies":[]},{"node_id":"n2","node_type":"skill","skill_name":"SendEmail","mem_hint":{"version":"1.0","strategy":"NONE"},"dependencies":["n1"]}],"intent_context":{"from":"model"}}}`,
 					)),
 				}, nil
 			}),

@@ -9,7 +9,7 @@ apps/worker-ts/node_modules/
 apps/worker-ts/dist/
 
 # Rust
-apps/polaris/target/
+apps/mem3/target/
 
 # IDE
 .vscode/*.log

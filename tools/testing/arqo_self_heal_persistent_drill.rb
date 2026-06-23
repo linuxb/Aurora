@@ -67,13 +67,13 @@ def apply_replan(session_id)
     tasks: [
       {
         ref_id: "patch_root",
-        node_type: "SKILL_SINK",
+        node_type: "skill",
         skill_name: "QueryLog",
         dependencies: []
       },
       {
         ref_id: "patch_finish",
-        node_type: "SKILL_SINK",
+        node_type: "skill",
         skill_name: "SendEmail",
         dependencies: ["patch_root"]
       }

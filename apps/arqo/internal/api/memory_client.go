@@ -1,194 +1,180 @@
 package api
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"aurora/apps/arqo/internal/scheduler"
 )
 
-type MemoryEntry struct {
-	UserID    string `json:"user_id"`
+type Mem3Scope struct {
+	TenantID  string `json:"tenant_id"`
+	AgentID   string `json:"agent_id"`
+	UserID    string `json:"user_id,omitempty"`
 	SessionID string `json:"session_id"`
-	TaskID    string `json:"task_id"`
-	Summary   string `json:"summary"`
+	DAGID     string `json:"dag_id"`
 }
 
-type MemorySearcher interface {
-	Search(userID, sessionID, query string, limit int) ([]MemoryEntry, error)
-	SearchByHint(userID, sessionID, query string, limit int) ([]MemoryEntry, error)
+type Mem3IntentSlot struct {
+	MacroIntent     string   `json:"macro_intent"`
+	Entities        []string `json:"entities"`
+	TemporalContext string   `json:"temporal_context,omitempty"`
+	ActionVerbs     []string `json:"action_verbs"`
+	ExtractionHint  string   `json:"extraction_hint,omitempty"`
 }
 
-type PolarisMemoryClient struct {
-	baseURL      string
-	client       *http.Client
-	rewriteMode  string
-	rankMode     string
-	defaultLimit int
-	strict       bool
-	hintEnabled  bool
+type Mem3DAGContext struct {
+	RawQuery   string         `json:"raw_query"`
+	IntentSlot Mem3IntentSlot `json:"intent_slot"`
+	ObservedAt time.Time      `json:"observed_at"`
 }
 
-func NewPolarisMemoryClientFromEnv() *PolarisMemoryClient {
-	baseURL := strings.TrimSpace(os.Getenv("ARQO_POLARIS_URL"))
+type Mem3TaskOutput struct {
+	TaskID        string    `json:"task_id"`
+	ParentTaskIDs []string  `json:"parent_task_ids,omitempty"`
+	Sequence      int64     `json:"sequence"`
+	NodeType      string    `json:"node_type"`
+	SkillName     string    `json:"skill_name,omitempty"`
+	Output        any       `json:"output"`
+	SkillSummary  string    `json:"skill_summary,omitempty"`
+	CompletedAt   time.Time `json:"completed_at"`
+}
+
+type Mem3IngestRequest struct {
+	Version        string    `json:"version"`
+	IdempotencyKey string    `json:"idempotency_key"`
+	Kind           string    `json:"kind"`
+	Scope          Mem3Scope `json:"scope"`
+	Payload        any       `json:"payload"`
+}
+
+type Mem3CurrentTask struct {
+	TaskID               string   `json:"task_id"`
+	Sequence             int64    `json:"sequence"`
+	NodeType             string   `json:"node_type"`
+	ParentTaskIDs        []string `json:"parent_task_ids"`
+	MemHintSourceTaskIDs []string `json:"mem_hint_source_task_ids"`
+}
+
+type Mem3SearchRequest struct {
+	Version     string            `json:"version"`
+	Scope       Mem3Scope         `json:"scope"`
+	CurrentTask Mem3CurrentTask   `json:"current_task"`
+	RecentLimit int               `json:"recent_limit"`
+	MemHint     scheduler.MemHint `json:"mem_hint"`
+}
+
+type Mem3MemoryItem struct {
+	TaskID   string `json:"task_id,omitempty"`
+	Sequence int64  `json:"sequence,omitempty"`
+	NodeType string `json:"node_type,omitempty"`
+	Output   any    `json:"output,omitempty"`
+	Summary  string `json:"summary,omitempty"`
+}
+
+type Mem3Summary struct {
+	Summary         string `json:"summary"`
+	SummaryVersion  int64  `json:"summary_version"`
+	ThroughSequence int64  `json:"through_sequence"`
+}
+
+type Mem3SearchResponse struct {
+	Version       string `json:"version"`
+	WorkingMemory struct {
+		RecentOutputs []Mem3MemoryItem `json:"recent_outputs"`
+		LatestSummary Mem3Summary      `json:"latest_summary"`
+	} `json:"working_memory"`
+	Retrieval struct {
+		Strategy string           `json:"strategy"`
+		Items    []map[string]any `json:"items"`
+	} `json:"retrieval"`
+	Consistency struct {
+		LatestIngestedSequence int64 `json:"latest_ingested_sequence"`
+		SummaryThroughSequence int64 `json:"summary_through_sequence"`
+		SummaryPending         bool  `json:"summary_pending"`
+	} `json:"consistency"`
+}
+
+type MemoryClient interface {
+	Ingest(context.Context, Mem3IngestRequest) error
+	Search(context.Context, Mem3SearchRequest) (Mem3SearchResponse, error)
+}
+
+type Mem3MemoryClient struct {
+	baseURL string
+	client  *http.Client
+	strict  bool
+}
+
+func NewMem3MemoryClientFromEnv() *Mem3MemoryClient {
+	baseURL := strings.TrimSpace(os.Getenv("ARQO_MEM3_URL"))
 	if baseURL == "" {
 		return nil
 	}
-	timeoutMS := parsePositiveIntEnv("ARQO_POLARIS_TIMEOUT_MS", 1500)
-	return &PolarisMemoryClient{
-		baseURL:      strings.TrimRight(baseURL, "/"),
-		client:       &http.Client{Timeout: time.Duration(timeoutMS) * time.Millisecond},
-		rewriteMode:  parseEnumEnv("ARQO_MEMORY_QUERY_REWRITE", "none", []string{"none", "trim"}),
-		rankMode:     parseEnumEnv("ARQO_MEMORY_HIT_RANK", "none", []string{"none", "short_first", "long_first"}),
-		defaultLimit: parsePositiveIntEnv("ARQO_MEMORY_HIT_LIMIT", 5),
-		strict:       strings.EqualFold(strings.TrimSpace(os.Getenv("ARQO_MEMORY_FALLBACK_STRICT")), "true"),
-		hintEnabled:  strings.EqualFold(strings.TrimSpace(os.Getenv("ARQO_MEMORY_HINT_ENABLED")), "true"),
+	timeoutMS := parsePositiveIntEnv("ARQO_MEM3_TIMEOUT_MS", 1500)
+	return &Mem3MemoryClient{
+		baseURL: strings.TrimRight(baseURL, "/"),
+		client:  &http.Client{Timeout: time.Duration(timeoutMS) * time.Millisecond},
+		strict:  strings.EqualFold(strings.TrimSpace(os.Getenv("ARQO_MEMORY_FALLBACK_STRICT")), "true"),
 	}
 }
 
-func (c *PolarisMemoryClient) Search(userID, sessionID, query string, limit int) ([]MemoryEntry, error) {
+func (c *Mem3MemoryClient) Ingest(ctx context.Context, payload Mem3IngestRequest) error {
 	if c == nil || c.baseURL == "" {
-		return nil, nil
+		return nil
 	}
-
-	effectiveLimit := limit
-	if effectiveLimit <= 0 {
-		effectiveLimit = c.defaultLimit
-	}
-	effectiveQuery := c.rewriteQuery(query)
-
-	values := url.Values{}
-	values.Set("user_id", userID)
-	if sessionID != "" {
-		values.Set("session_id", sessionID)
-	}
-	if effectiveQuery != "" {
-		values.Set("q", effectiveQuery)
-	}
-	if effectiveLimit > 0 {
-		values.Set("limit", strconv.Itoa(effectiveLimit))
-	}
-	reqURL := fmt.Sprintf("%s/memory/search?%s", c.baseURL, values.Encode())
-	req, err := http.NewRequest(http.MethodGet, reqURL, nil)
-	if err != nil {
-		if c.strict {
-			return nil, err
-		}
-		return nil, nil
-	}
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		if c.strict {
-			return nil, err
-		}
-		return nil, nil
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		err = fmt.Errorf("polaris search status=%d", resp.StatusCode)
-		if c.strict {
-			return nil, err
-		}
-		return nil, nil
-	}
-
-	var payload struct {
-		Entries []MemoryEntry `json:"entries"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		if c.strict {
-			return nil, err
-		}
-		return nil, nil
-	}
-	return c.rankEntries(payload.Entries), nil
+	return c.postJSON(ctx, "/v1/memory/ingest", payload, http.StatusAccepted, nil)
 }
 
-func (c *PolarisMemoryClient) SearchByHint(userID, sessionID, query string, limit int) ([]MemoryEntry, error) {
-	if c == nil || c.baseURL == "" || !c.hintEnabled {
-		return nil, nil
+func (c *Mem3MemoryClient) Search(ctx context.Context, payload Mem3SearchRequest) (Mem3SearchResponse, error) {
+	var out Mem3SearchResponse
+	if c == nil || c.baseURL == "" {
+		return out, nil
 	}
-	effectiveLimit := limit
-	if effectiveLimit <= 0 {
-		effectiveLimit = c.defaultLimit
-	}
-	effectiveQuery := c.rewriteQuery(query)
-	payload := map[string]any{
-		"user_id":    userID,
-		"session_id": sessionID,
-		"limit":      effectiveLimit,
-		"mem_hint": map[string]any{
-			"strategy":       inferHintStrategy(effectiveQuery),
-			"semantic_query": effectiveQuery,
-		},
-	}
-	body, _ := json.Marshal(payload)
-	reqURL := fmt.Sprintf("%s/memory/search_by_hint", c.baseURL)
-	req, err := http.NewRequest(http.MethodPost, reqURL, strings.NewReader(string(body)))
+	err := c.postJSON(ctx, "/v1/memory/search", payload, http.StatusOK, &out)
+	return out, err
+}
+
+func (c *Mem3MemoryClient) postJSON(ctx context.Context, path string, payload any, expectedStatus int, out any) error {
+	body, err := json.Marshal(payload)
 	if err != nil {
-		if c.strict {
-			return nil, err
-		}
-		return nil, nil
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body))
+	if err != nil {
+		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.client.Do(req)
 	if err != nil {
 		if c.strict {
-			return nil, err
+			return err
 		}
-		return nil, nil
+		return nil
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		err = fmt.Errorf("polaris hint search status=%d", resp.StatusCode)
+	if resp.StatusCode != expectedStatus {
+		err = fmt.Errorf("mem3 %s status=%d", path, resp.StatusCode)
 		if c.strict {
-			return nil, err
+			return err
 		}
-		return nil, nil
+		return nil
 	}
-	var out struct {
-		Entries []MemoryEntry `json:"entries"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		if c.strict {
-			return nil, err
+	if out != nil {
+		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+			if c.strict {
+				return err
+			}
 		}
-		return nil, nil
 	}
-	return c.rankEntries(out.Entries), nil
-}
-
-func (c *PolarisMemoryClient) rewriteQuery(query string) string {
-	trimmed := strings.TrimSpace(query)
-	switch c.rewriteMode {
-	case "trim":
-		return strings.Join(strings.Fields(trimmed), " ")
-	default:
-		return query
-	}
-}
-
-func (c *PolarisMemoryClient) rankEntries(entries []MemoryEntry) []MemoryEntry {
-	out := make([]MemoryEntry, len(entries))
-	copy(out, entries)
-	switch c.rankMode {
-	case "short_first":
-		sort.SliceStable(out, func(i, j int) bool {
-			return len(out[i].Summary) < len(out[j].Summary)
-		})
-	case "long_first":
-		sort.SliceStable(out, func(i, j int) bool {
-			return len(out[i].Summary) > len(out[j].Summary)
-		})
-	}
-	return out
+	return nil
 }
 
 func parsePositiveIntEnv(key string, fallback int) int {
@@ -201,28 +187,4 @@ func parsePositiveIntEnv(key string, fallback int) int {
 		return fallback
 	}
 	return parsed
-}
-
-func parseEnumEnv(key, fallback string, allowed []string) string {
-	raw := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
-	if raw == "" {
-		return fallback
-	}
-	for _, candidate := range allowed {
-		if raw == candidate {
-			return candidate
-		}
-	}
-	return fallback
-}
-
-func inferHintStrategy(query string) string {
-	lower := strings.ToLower(strings.TrimSpace(query))
-	if strings.Contains(lower, "relation") || strings.Contains(lower, "dependency") || strings.Contains(lower, "impact") {
-		return "GRAPH_TRAVERSAL"
-	}
-	if strings.Contains(lower, "task ") || strings.Contains(lower, "step ") {
-		return "KV_POINT_GET"
-	}
-	return "NONE"
 }

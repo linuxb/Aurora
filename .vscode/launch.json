@@ -8,7 +8,8 @@
       "mode": "auto",
       "program": "${workspaceFolder}/apps/arqo",
       "env": {
-        "ARQO_ADDR": ":8080"
+        "ARQO_ADDR": ":8080",
+        "ARQO_MEM3_URL": "http://127.0.0.1:8082"
       }
     },
     {
@@ -27,24 +28,24 @@
       }
     },
     {
-      "name": "Run polaris (Rust)",
+      "name": "Run mem3 (Rust)",
       "type": "lldb",
       "request": "launch",
       "cargo": {
         "args": [
           "build",
           "--manifest-path",
-          "${workspaceFolder}/apps/polaris/Cargo.toml"
+          "${workspaceFolder}/apps/mem3/Cargo.toml"
         ],
         "filter": {
-          "name": "polaris",
+          "name": "mem3",
           "kind": "bin"
         }
       },
       "args": [],
-      "cwd": "${workspaceFolder}/apps/polaris",
+      "cwd": "${workspaceFolder}/apps/mem3",
       "env": {
-        "POLARIS_ADDR": "127.0.0.1:8082"
+        "MEM3_ADDR": "127.0.0.1:8082"
       }
     }
   ]

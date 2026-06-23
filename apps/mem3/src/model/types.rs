@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::sync::Arc;
 
-use crate::memory::enrich::Enricher;
 use crate::graph::store::GraphStore;
-use crate::plato::engine::PlatoEngine;
+use crate::memory::enrich::Enricher;
 use crate::memory::store::MemoryStore;
+use crate::plato::engine::PlatoEngine;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MemoryEntry {
@@ -67,7 +68,7 @@ pub struct ListQueryParams {
     pub limit: Option<usize>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct MemHint {
     pub version: Option<String>,
     pub target_system: Option<String>,
@@ -80,11 +81,47 @@ pub struct MemHint {
     pub query: Option<MemHintQuery>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct MemHintQuery {
     pub text: Option<String>,
     pub keywords: Option<Vec<String>>,
     pub target_task_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct Mem3Scope {
+    pub tenant_id: String,
+    pub agent_id: String,
+    pub user_id: Option<String>,
+    pub session_id: String,
+    pub dag_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct Mem3IngestRequest {
+    pub version: String,
+    pub idempotency_key: String,
+    pub kind: String,
+    pub scope: Mem3Scope,
+    pub payload: Value,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct Mem3CurrentTask {
+    pub task_id: String,
+    pub sequence: u64,
+    pub node_type: String,
+    pub parent_task_ids: Vec<String>,
+    pub mem_hint_source_task_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct Mem3SearchRequest {
+    pub version: String,
+    pub scope: Mem3Scope,
+    pub current_task: Mem3CurrentTask,
+    pub recent_limit: usize,
+    pub mem_hint: MemHint,
 }
 
 #[derive(Deserialize)]

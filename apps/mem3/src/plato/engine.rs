@@ -4,7 +4,7 @@ use serde::Serialize;
 use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
 use std::env;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -21,13 +21,21 @@ pub struct CommunitySummary {
 }
 
 pub trait GraphAnalyticsAdapter: Send + Sync {
-    fn detect_communities(&self, nodes: &[GraphNode], edges: &[GraphEdge]) -> HashMap<String, String>;
+    fn detect_communities(
+        &self,
+        nodes: &[GraphNode],
+        edges: &[GraphEdge],
+    ) -> HashMap<String, String>;
 }
 
 pub struct PetgraphCommunityAdapter;
 
 impl GraphAnalyticsAdapter for PetgraphCommunityAdapter {
-    fn detect_communities(&self, nodes: &[GraphNode], edges: &[GraphEdge]) -> HashMap<String, String> {
+    fn detect_communities(
+        &self,
+        nodes: &[GraphNode],
+        edges: &[GraphEdge],
+    ) -> HashMap<String, String> {
         let mut g: UnGraph<String, ()> = UnGraph::new_undirected();
         let mut idx = HashMap::new();
         for node in nodes {
@@ -56,7 +64,11 @@ impl GraphAnalyticsAdapter for PetgraphCommunityAdapter {
 pub struct LouvainApproxAdapter;
 
 impl GraphAnalyticsAdapter for LouvainApproxAdapter {
-    fn detect_communities(&self, nodes: &[GraphNode], edges: &[GraphEdge]) -> HashMap<String, String> {
+    fn detect_communities(
+        &self,
+        nodes: &[GraphNode],
+        edges: &[GraphEdge],
+    ) -> HashMap<String, String> {
         // Local-first approximation: start from SCC result and coarsen low-weight isolated nodes.
         let base = PetgraphCommunityAdapter.detect_communities(nodes, edges);
         let mut community_sizes = HashMap::<String, usize>::new();
@@ -83,7 +95,11 @@ impl GraphAnalyticsAdapter for LouvainApproxAdapter {
 pub struct MemgraphMageStubAdapter;
 
 impl GraphAnalyticsAdapter for MemgraphMageStubAdapter {
-    fn detect_communities(&self, nodes: &[GraphNode], edges: &[GraphEdge]) -> HashMap<String, String> {
+    fn detect_communities(
+        &self,
+        nodes: &[GraphNode],
+        edges: &[GraphEdge],
+    ) -> HashMap<String, String> {
         // Stub behavior: keep deterministic local partition while reserving adapter seam
         // for future "CALL community.leiden()" remote execution.
         PetgraphCommunityAdapter.detect_communities(nodes, edges)
@@ -175,7 +191,8 @@ impl PlatoEngine {
             .unwrap_or(7200);
 
         let should_recluster = state.dirty_edges_count >= count_threshold
-            || (state.dirty_edges_count > 0 && now.saturating_sub(state.last_clustered_at) >= seconds_threshold);
+            || (state.dirty_edges_count > 0
+                && now.saturating_sub(state.last_clustered_at) >= seconds_threshold);
 
         if should_recluster {
             self.recluster_state(scope_key, state, nodes, edges, now);
@@ -419,10 +436,25 @@ mod tests {
         let engine = PlatoEngine::new_default();
         let scope = PlatoEngine::scope_key("u1", "s1", "d1");
         let nodes = vec![
-            GraphNode { id: "a".into(), label: "payment".into(), node_type: "system".into(), weight: 3 },
-            GraphNode { id: "b".into(), label: "auth".into(), node_type: "system".into(), weight: 2 },
+            GraphNode {
+                id: "a".into(),
+                label: "payment".into(),
+                node_type: "system".into(),
+                weight: 3,
+            },
+            GraphNode {
+                id: "b".into(),
+                label: "auth".into(),
+                node_type: "system".into(),
+                weight: 2,
+            },
         ];
-        let edges = vec![GraphEdge { source: "a".into(), target: "b".into(), relation: "calls".into(), weight: 1 }];
+        let edges = vec![GraphEdge {
+            source: "a".into(),
+            target: "b".into(),
+            relation: "calls".into(),
+            weight: 1,
+        }];
         engine.observe_graph(&scope, &nodes, &edges);
         engine.observe_graph(&scope, &nodes, &edges);
         let result = engine.query_global(&scope, "payment", &["payment".into()], 3);
@@ -433,10 +465,25 @@ mod tests {
     fn query_local_should_filter_by_keywords() {
         let engine = PlatoEngine::new_default();
         let nodes = vec![
-            GraphNode { id: "svc_pay".into(), label: "payment".into(), node_type: "system".into(), weight: 3 },
-            GraphNode { id: "svc_auth".into(), label: "auth".into(), node_type: "system".into(), weight: 2 },
+            GraphNode {
+                id: "svc_pay".into(),
+                label: "payment".into(),
+                node_type: "system".into(),
+                weight: 3,
+            },
+            GraphNode {
+                id: "svc_auth".into(),
+                label: "auth".into(),
+                node_type: "system".into(),
+                weight: 2,
+            },
         ];
-        let edges = vec![GraphEdge { source: "svc_pay".into(), target: "svc_auth".into(), relation: "calls".into(), weight: 1 }];
+        let edges = vec![GraphEdge {
+            source: "svc_pay".into(),
+            target: "svc_auth".into(),
+            relation: "calls".into(),
+            weight: 1,
+        }];
         let (n, e) = engine.query_local(&nodes, &edges, &["payment".into()], "");
         assert!(!n.is_empty());
         assert!(!e.is_empty());

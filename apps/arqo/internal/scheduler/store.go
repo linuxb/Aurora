@@ -3,6 +3,7 @@ package scheduler
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -77,12 +78,16 @@ func (s *Store) CreateDemoSession(userID, intent string) (Snapshot, error) {
 	session := model.Session{
 		SessionID: sessionID,
 		DAGID:     dagID,
+		TenantID:  userID,
+		AgentID:   "aurora-default",
 		UserID:    userID,
 		Intent:    intent,
 		CreatedAt: now,
 	}
 	dag := model.DAG{
 		DAGID:             dagID,
+		TenantID:          userID,
+		AgentID:           "aurora-default",
 		SessionID:         sessionID,
 		UserID:            userID,
 		OriginalIntent:    intent,
@@ -102,7 +107,9 @@ func (s *Store) CreateDemoSession(userID, intent string) (Snapshot, error) {
 	queryTask := &model.Task{
 		TaskID:                   queryTaskID,
 		DAGID:                    dagID,
+		Sequence:                 0,
 		NodeType:                 model.NodeTypeSkillSink,
+		MemHint:                  memHintMap(DefaultMemHint()),
 		SkillName:                "QueryLog",
 		Status:                   model.TaskStatusReady,
 		PendingDependenciesCount: 0,
@@ -112,7 +119,9 @@ func (s *Store) CreateDemoSession(userID, intent string) (Snapshot, error) {
 	summaryTask := &model.Task{
 		TaskID:                   summaryTaskID,
 		DAGID:                    dagID,
+		Sequence:                 1,
 		NodeType:                 model.NodeTypeSkillSink,
+		MemHint:                  memHintMap(DefaultMemHint()),
 		SkillName:                "LLMSummarize",
 		Status:                   model.TaskStatusPending,
 		PendingDependenciesCount: 1,
@@ -122,7 +131,9 @@ func (s *Store) CreateDemoSession(userID, intent string) (Snapshot, error) {
 	mailTask := &model.Task{
 		TaskID:                   mailTaskID,
 		DAGID:                    dagID,
+		Sequence:                 2,
 		NodeType:                 model.NodeTypeSkillSink,
+		MemHint:                  memHintMap(DefaultMemHint()),
 		SkillName:                "SendEmail",
 		Status:                   model.TaskStatusPending,
 		PendingDependenciesCount: 1,
@@ -155,12 +166,16 @@ func (s *Store) CreateJITDemoSession(userID, intent string) (Snapshot, error) {
 	session := model.Session{
 		SessionID: sessionID,
 		DAGID:     dagID,
+		TenantID:  userID,
+		AgentID:   "aurora-default",
 		UserID:    userID,
 		Intent:    intent,
 		CreatedAt: now,
 	}
 	dag := model.DAG{
 		DAGID:             dagID,
+		TenantID:          userID,
+		AgentID:           "aurora-default",
 		SessionID:         sessionID,
 		UserID:            userID,
 		OriginalIntent:    intent,
@@ -175,7 +190,10 @@ func (s *Store) CreateJITDemoSession(userID, intent string) (Snapshot, error) {
 	plannerTask := &model.Task{
 		TaskID:                   plannerTaskID,
 		DAGID:                    dagID,
+		Sequence:                 0,
 		NodeType:                 model.NodeTypeExpandPlanning,
+		Goal:                     intent,
+		MemHint:                  memHintMap(DefaultMemHint()),
 		SkillName:                "ReActPlanner",
 		Status:                   model.TaskStatusReady,
 		PendingDependenciesCount: 0,
@@ -186,7 +204,9 @@ func (s *Store) CreateJITDemoSession(userID, intent string) (Snapshot, error) {
 	finalTask := &model.Task{
 		TaskID:                   finalTaskID,
 		DAGID:                    dagID,
+		Sequence:                 1,
 		NodeType:                 model.NodeTypeSkillSink,
+		MemHint:                  memHintMap(DefaultMemHint()),
 		SkillName:                "SendEmail",
 		Status:                   model.TaskStatusPending,
 		PendingDependenciesCount: 1,
@@ -205,26 +225,55 @@ func (s *Store) CreateJITDemoSession(userID, intent string) (Snapshot, error) {
 }
 
 func (s *Store) CreateSessionFromPlan(userID, intent string, intentContext map[string]any, tasks []SessionTaskSpec) (Snapshot, error) {
+	return s.CreateSessionFromPreparedPlan(CreateSessionPlanInput{
+		UserID:        userID,
+		TenantID:      userID,
+		AgentID:       "aurora-default",
+		Intent:        intent,
+		IntentContext: intentContext,
+		Tasks:         tasks,
+	})
+}
+
+func (s *Store) CreateSessionFromPreparedPlan(input CreateSessionPlanInput) (Snapshot, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	sessionID := fmt.Sprintf("sess_%06d", s.sessionCounter.Add(1))
-	dagID := fmt.Sprintf("dag_%06d", s.dagCounter.Add(1))
+	sessionID := input.Identity.SessionID
+	if sessionID == "" {
+		sessionID = fmt.Sprintf("sess_%06d", s.sessionCounter.Add(1))
+	}
+	dagID := input.Identity.DAGID
+	if dagID == "" {
+		dagID = fmt.Sprintf("dag_%06d", s.dagCounter.Add(1))
+	}
+	tenantID := input.TenantID
+	if tenantID == "" {
+		tenantID = input.UserID
+	}
+	agentID := input.AgentID
+	if agentID == "" {
+		agentID = "aurora-default"
+	}
 	now := time.Now().UTC()
 
 	session := model.Session{
 		SessionID: sessionID,
 		DAGID:     dagID,
-		UserID:    userID,
-		Intent:    intent,
+		TenantID:  tenantID,
+		AgentID:   agentID,
+		UserID:    input.UserID,
+		Intent:    input.Intent,
 		CreatedAt: now,
 	}
 	dag := model.DAG{
 		DAGID:             dagID,
+		TenantID:          tenantID,
+		AgentID:           agentID,
 		SessionID:         sessionID,
-		UserID:            userID,
-		OriginalIntent:    intent,
-		IntentContext:     cloneMap(intentContext),
+		UserID:            input.UserID,
+		OriginalIntent:    input.Intent,
+		IntentContext:     cloneMap(input.IntentContext),
 		Status:            model.DAGStatusRunning,
 		CurrentDepth:      1,
 		MaxDepth:          10,
@@ -233,13 +282,13 @@ func (s *Store) CreateSessionFromPlan(userID, intent string, intentContext map[s
 		CreatedAt:         now,
 	}
 
-	refToTaskID := make(map[string]string, len(tasks))
-	for _, spec := range tasks {
+	refToTaskID := make(map[string]string, len(input.Tasks))
+	for _, spec := range input.Tasks {
 		refToTaskID[spec.RefID] = fmt.Sprintf("task_%06d", s.taskCounter.Add(1))
 	}
 
-	resolvedChildren := make(map[string][]string, len(tasks))
-	for _, spec := range tasks {
+	resolvedChildren := make(map[string][]string, len(input.Tasks))
+	for _, spec := range input.Tasks {
 		for _, depRef := range spec.Dependencies {
 			resolvedChildren[depRef] = append(resolvedChildren[depRef], spec.RefID)
 		}
@@ -248,9 +297,9 @@ func (s *Store) CreateSessionFromPlan(userID, intent string, intentContext map[s
 	s.sessions[sessionID] = session
 	s.dags[dagID] = dag
 	s.rawDataByDAG[dagID] = make(map[string]any)
-	s.tasksByDAG[dagID] = make([]string, 0, len(tasks))
+	s.tasksByDAG[dagID] = make([]string, 0, len(input.Tasks))
 
-	for _, spec := range tasks {
+	for sequence, spec := range input.Tasks {
 		nodeType := spec.NodeType
 		parsedNodeType, err := model.ParseNodeType(string(nodeType))
 		if err != nil {
@@ -272,8 +321,11 @@ func (s *Store) CreateSessionFromPlan(userID, intent string, intentContext map[s
 		task := &model.Task{
 			TaskID:                   taskID,
 			DAGID:                    dagID,
+			Sequence:                 int64(sequence),
 			NodeType:                 parsedNodeType,
 			SkillName:                spec.SkillName,
+			Goal:                     spec.Goal,
+			MemHint:                  memHintMap(spec.MemHint),
 			Status:                   status,
 			PendingDependenciesCount: len(deps),
 			Dependencies:             deps,
@@ -307,6 +359,7 @@ func (s *Store) ApplyReplanPatch(sessionID string, tasks []SessionTaskSpec, reas
 	}
 
 	refToTaskID := make(map[string]string, len(tasks))
+	nextSequence := s.nextTaskSequenceLocked(dag.DAGID)
 	for _, spec := range tasks {
 		refToTaskID[spec.RefID] = fmt.Sprintf("task_%06d", s.taskCounter.Add(1))
 	}
@@ -353,8 +406,11 @@ func (s *Store) ApplyReplanPatch(sessionID string, tasks []SessionTaskSpec, reas
 		task := &model.Task{
 			TaskID:                   taskID,
 			DAGID:                    dag.DAGID,
+			Sequence:                 nextSequence,
 			NodeType:                 parsedNodeType,
 			SkillName:                spec.SkillName,
+			Goal:                     spec.Goal,
+			MemHint:                  memHintMap(spec.MemHint),
 			Status:                   status,
 			PendingDependenciesCount: countPendingDependencies(s.tasksByID, deps),
 			Dependencies:             deps,
@@ -362,6 +418,7 @@ func (s *Store) ApplyReplanPatch(sessionID string, tasks []SessionTaskSpec, reas
 			Parameters:               params,
 		}
 		s.tasksByID[taskID] = task
+		nextSequence++
 		s.tasksByDAG[dag.DAGID] = append(s.tasksByDAG[dag.DAGID], taskID)
 		for _, depID := range deps {
 			if depTask := s.tasksByID[depID]; depTask != nil && !containsString(depTask.Children, taskID) {
@@ -508,6 +565,7 @@ func (s *Store) applyExpansionLocked(task *model.Task, input CompleteTaskInput) 
 
 	newNodeIDs := make([]string, 0, len(payload.NewNodes))
 	directNodeIDs := make([]string, 0, len(payload.NewNodes))
+	nextSequence := s.nextTaskSequenceLocked(task.DAGID)
 	for _, node := range payload.NewNodes {
 		pending := 0
 		for _, depID := range node.Dependencies {
@@ -523,8 +581,11 @@ func (s *Store) applyExpansionLocked(task *model.Task, input CompleteTaskInput) 
 		taskNode := &model.Task{
 			TaskID:                   node.NodeID,
 			DAGID:                    task.DAGID,
+			Sequence:                 nextSequence,
 			NodeType:                 node.NodeType,
 			SkillName:                node.SkillName,
+			Goal:                     node.Goal,
+			MemHint:                  memHintMap(valueOrDefaultMemHint(node.MemHint)),
 			Status:                   status,
 			PendingDependenciesCount: pending,
 			Dependencies:             append([]string{}, node.Dependencies...),
@@ -541,6 +602,7 @@ func (s *Store) applyExpansionLocked(task *model.Task, input CompleteTaskInput) 
 			taskNode.Parameters = injectIntentContext(taskNode.Parameters, dag.IntentContext)
 		}
 		s.tasksByID[node.NodeID] = taskNode
+		nextSequence++
 		s.tasksByDAG[task.DAGID] = append(s.tasksByDAG[task.DAGID], node.NodeID)
 		newNodeIDs = append(newNodeIDs, node.NodeID)
 		if containsString(node.Dependencies, task.TaskID) {
@@ -617,6 +679,9 @@ func (s *Store) validateExpansionLocked(task *model.Task, payload *ExpansionPayl
 		if node.NodeType == model.NodeTypeExpandPlanning && node.SkillName != "" && node.SkillName != "ReActPlanner" {
 			return ErrExpansionInvalid
 		}
+		if node.NodeType == model.NodeTypePlanner && strings.TrimSpace(node.Goal) == "" {
+			return ErrExpansionInvalid
+		}
 		if err := ValidateMemHint(node.MemHint); err != nil {
 			return ErrExpansionInvalid
 		}
@@ -685,6 +750,23 @@ func countPendingDependencies(tasks map[string]*model.Task, deps []string) int {
 		}
 	}
 	return pending
+}
+
+func (s *Store) nextTaskSequenceLocked(dagID string) int64 {
+	var next int64
+	for _, taskID := range s.tasksByDAG[dagID] {
+		if task := s.tasksByID[taskID]; task != nil && task.Sequence >= next {
+			next = task.Sequence + 1
+		}
+	}
+	return next
+}
+
+func valueOrDefaultMemHint(hint *MemHint) MemHint {
+	if hint == nil {
+		return DefaultMemHint()
+	}
+	return *hint
 }
 
 func cloneMap(src map[string]any) map[string]any {

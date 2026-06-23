@@ -16,11 +16,13 @@ func (m *MockLightweightIntentModel) Extract(intent string, planningMode string)
 	normalizedIntent := strings.ToLower(strings.TrimSpace(intent))
 	normalizedMode := strings.ToLower(strings.TrimSpace(planningMode))
 	return map[string]any{
-		"original_intent": intent,
-		"macro_intent":    normalizedIntent,
-		"slots": map[string]any{
-			"planning_mode": normalizedMode,
-		},
+		"macro_intent":          normalizedIntent,
+		"entities":              []string{},
+		"temporal_context":      "",
+		"action_verbs":          []string{},
+		"extraction_hint":       "mock lightweight intent extraction",
+		"original_intent":       intent,
+		"planning_mode":         normalizedMode,
 		"intent_router_backend": "mock_lightweight_model",
 	}
 }

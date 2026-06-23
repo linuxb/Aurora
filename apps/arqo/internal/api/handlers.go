@@ -19,7 +19,7 @@ type Server struct {
 	store   scheduler.Engine
 	broker  events.Broker
 	planner planner.Router
-	memory  MemorySearcher
+	memory  MemoryClient
 }
 
 func NewServer(store scheduler.Engine, broker events.Broker) *Server {
@@ -27,15 +27,15 @@ func NewServer(store scheduler.Engine, broker events.Broker) *Server {
 		store:   store,
 		broker:  broker,
 		planner: planner.NewMockRouter(),
-		memory:  NewPolarisMemoryClientFromEnv(),
+		memory:  NewMem3MemoryClientFromEnv(),
 	}
 }
 
 func NewServerWithPlanner(store scheduler.Engine, broker events.Broker, dagPlanner planner.Router) *Server {
-	return NewServerWithPlannerAndMemory(store, broker, dagPlanner, NewPolarisMemoryClientFromEnv())
+	return NewServerWithPlannerAndMemory(store, broker, dagPlanner, NewMem3MemoryClientFromEnv())
 }
 
-func NewServerWithPlannerAndMemory(store scheduler.Engine, broker events.Broker, dagPlanner planner.Router, memory MemorySearcher) *Server {
+func NewServerWithPlannerAndMemory(store scheduler.Engine, broker events.Broker, dagPlanner planner.Router, memory MemoryClient) *Server {
 	if dagPlanner == nil {
 		dagPlanner = planner.NewMockRouter()
 	}
@@ -60,6 +60,8 @@ func (s *Server) healthz(w http.ResponseWriter, _ *http.Request) {
 
 type createSessionRequest struct {
 	UserID       string `json:"user_id"`
+	TenantID     string `json:"tenant_id"`
+	AgentID      string `json:"agent_id"`
 	Intent       string `json:"intent"`
 	PlanningMode string `json:"planning_mode"`
 }
@@ -76,6 +78,8 @@ func toSessionTaskSpecs(nodes []planner.Node) []scheduler.SessionTaskSpec {
 			RefID:        node.NodeID,
 			NodeType:     node.NodeType,
 			SkillName:    node.SkillName,
+			Goal:         node.Goal,
+			MemHint:      node.MemHint,
 			Parameters:   node.Parameters,
 			Dependencies: node.Dependencies,
 		})
@@ -94,13 +98,59 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	plan, err := s.planner.Plan(req.Intent, req.PlanningMode)
+	tenantID := strings.TrimSpace(req.TenantID)
+	if tenantID == "" {
+		tenantID = req.UserID
+	}
+	agentID := strings.TrimSpace(req.AgentID)
+	if agentID == "" {
+		agentID = "aurora-default"
+	}
+	identity, err := scheduler.NewSessionIdentity()
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "identity_generation_failed", err.Error())
+		return
+	}
+	intentContext := map[string]any{"original_intent": req.Intent}
+	if extractor, ok := s.planner.(planner.IntentExtractor); ok {
+		intentContext, err = extractor.ExtractIntent(req.Intent, req.PlanningMode)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, "intent_extraction_failed", err.Error())
+			return
+		}
+	}
+	scope := Mem3Scope{
+		TenantID: tenantID, AgentID: agentID, UserID: req.UserID,
+		SessionID: identity.SessionID, DAGID: identity.DAGID,
+	}
+	if s.memory != nil {
+		err = s.memory.Ingest(r.Context(), Mem3IngestRequest{
+			Version:        "1.0",
+			IdempotencyKey: "dag-context:" + identity.DAGID,
+			Kind:           "DAG_CONTEXT",
+			Scope:          scope,
+			Payload: Mem3DAGContext{
+				RawQuery: req.Intent, IntentSlot: intentSlotFromContext(intentContext), ObservedAt: time.Now().UTC(),
+			},
+		})
+		if err != nil {
+			respondError(w, http.StatusBadGateway, "mem3_ingest_failed", err.Error())
+			return
+		}
+	}
+
+	var plan planner.Plan
+	if contextual, ok := s.planner.(planner.ContextPlanner); ok {
+		plan, err = contextual.PlanWithContext(req.Intent, req.PlanningMode, intentContext)
+	} else {
+		plan, err = s.planner.Plan(req.Intent, req.PlanningMode)
+	}
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "plan_generation_failed", err.Error())
 		return
 	}
 	if plan.IntentContext == nil {
-		plan.IntentContext = map[string]any{}
+		plan.IntentContext = intentContext
 	}
 	validation := planner.ValidateDAG(plan.Nodes)
 	plan.Warnings = validation.Warnings
@@ -116,7 +166,10 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var snapshot scheduler.Snapshot
-	snapshot, err = s.store.CreateSessionFromPlan(req.UserID, req.Intent, plan.IntentContext, toSessionTaskSpecs(plan.Nodes))
+	snapshot, err = s.store.CreateSessionFromPreparedPlan(scheduler.CreateSessionPlanInput{
+		Identity: identity, TenantID: tenantID, AgentID: agentID, UserID: req.UserID,
+		Intent: req.Intent, IntentContext: plan.IntentContext, Tasks: toSessionTaskSpecs(plan.Nodes),
+	})
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "create_session_failed", err.Error())
 		return
@@ -170,7 +223,11 @@ func (s *Server) pullTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if sessionID, ok := s.store.ResolveSessionIDByTaskID(task.TaskID); ok {
-		task = s.enrichPlannerTaskWithMemory(task, sessionID)
+		task, err = s.enrichTaskWithMemory(r.Context(), task, sessionID)
+		if err != nil {
+			respondError(w, http.StatusBadGateway, "mem3_search_failed", err.Error())
+			return
+		}
 		s.publishEvent(r.Context(), events.Event{
 			SessionID: sessionID,
 			EventType: "TASK_LEASED",
@@ -184,32 +241,46 @@ func (s *Server) pullTask(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, task)
 }
 
-func (s *Server) enrichPlannerTaskWithMemory(task *model.Task, sessionID string) *model.Task {
-	if task == nil || task.NodeType != model.NodeTypeExpandPlanning || s.memory == nil {
-		return task
+func (s *Server) enrichTaskWithMemory(ctx context.Context, task *model.Task, sessionID string) (*model.Task, error) {
+	if task == nil || s.memory == nil {
+		return task, nil
 	}
 	snapshot, err := s.store.GetSessionSnapshot(sessionID)
 	if err != nil {
-		return task
+		return task, err
 	}
 	if task.Parameters == nil {
 		task.Parameters = map[string]any{}
 	}
-	memHint := buildMemHintFromDependencies(snapshot.RawData, task.Dependencies)
+	memHint := memHintFromTask(task)
+	if len(task.Dependencies) > 0 {
+		memHint = buildMemHintFromDependencies(snapshot.RawData, task.Dependencies, memHint)
+	}
+	task.MemHint = memHintToMap(memHint)
 	task.Parameters["mem_hint"] = memHint
-	semanticQuery := memHint.SemanticQuery
-	entries, searchErr := s.memory.SearchByHint(snapshot.Session.UserID, sessionID, semanticQuery, 5)
-	if (searchErr != nil || len(entries) == 0) && semanticQuery != "" {
-		entries, searchErr = s.memory.Search(snapshot.Session.UserID, sessionID, semanticQuery, 5)
+	response, searchErr := s.memory.Search(ctx, Mem3SearchRequest{
+		Version: "1.0",
+		Scope: Mem3Scope{
+			TenantID: snapshot.DAG.TenantID, AgentID: snapshot.DAG.AgentID,
+			UserID: snapshot.Session.UserID, SessionID: sessionID, DAGID: snapshot.DAG.DAGID,
+		},
+		CurrentTask: Mem3CurrentTask{
+			TaskID: task.TaskID, Sequence: task.Sequence, NodeType: string(task.NodeType),
+			ParentTaskIDs: task.Dependencies, MemHintSourceTaskIDs: task.Dependencies,
+		},
+		RecentLimit: 5,
+		MemHint:     memHint,
+	})
+	if searchErr != nil {
+		return task, searchErr
 	}
-	if searchErr == nil && len(entries) > 0 {
-		task.Parameters["memory_hits"] = entries
-		task.Parameters["memory_hit_count"] = len(entries)
-	}
-	return task
+	task.Parameters["working_memory"] = response.WorkingMemory
+	task.Parameters["memory_retrieval"] = response.Retrieval
+	task.Parameters["memory_consistency"] = response.Consistency
+	return task, nil
 }
 
-func buildMemHintFromDependencies(rawData map[string]any, depTaskIDs []string) scheduler.MemHint {
+func buildMemHintFromDependencies(rawData map[string]any, depTaskIDs []string, initial scheduler.MemHint) scheduler.MemHint {
 	semanticParts := make([]string, 0, len(depTaskIDs))
 	for _, depID := range depTaskIDs {
 		v, ok := rawData[depID]
@@ -237,11 +308,16 @@ func buildMemHintFromDependencies(rawData map[string]any, depTaskIDs []string) s
 	if semanticQuery == "" {
 		semanticQuery = "recent dependency context"
 	}
-	return scheduler.MemHint{
-		Strategy:      scheduler.MemHintStrategy(scheduler.NormalizeMemHintStrategy(inferHintStrategy(semanticQuery))),
-		SemanticQuery: semanticQuery,
-		TargetStepID:  firstNonEmpty(depTaskIDs),
+	initial.Version = "1.0"
+	if initial.TargetSystem == "" {
+		initial.TargetSystem = "AUTO"
 	}
+	initial.Strategy = scheduler.NormalizeMemHintStrategy(inferHintStrategy(semanticQuery))
+	initial.Query.Text = semanticQuery
+	if initial.Strategy == scheduler.MemHintStrategyKVPointGet {
+		initial.Query.TargetTaskID = firstNonEmpty(depTaskIDs)
+	}
+	return initial
 }
 
 func firstNonEmpty(items []string) string {
@@ -251,6 +327,76 @@ func firstNonEmpty(items []string) string {
 		}
 	}
 	return ""
+}
+
+func intentSlotFromContext(intentContext map[string]any) Mem3IntentSlot {
+	return Mem3IntentSlot{
+		MacroIntent:     stringValue(intentContext["macro_intent"]),
+		Entities:        stringSliceValue(intentContext["entities"]),
+		TemporalContext: stringValue(intentContext["temporal_context"]),
+		ActionVerbs:     stringSliceValue(intentContext["action_verbs"]),
+		ExtractionHint:  stringValue(intentContext["extraction_hint"]),
+	}
+}
+
+func stringValue(value any) string {
+	if value == nil {
+		return ""
+	}
+	return fmt.Sprint(value)
+}
+
+func stringSliceValue(value any) []string {
+	switch typed := value.(type) {
+	case []string:
+		return append([]string{}, typed...)
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text := strings.TrimSpace(fmt.Sprint(item)); text != "" {
+				out = append(out, text)
+			}
+		}
+		return out
+	default:
+		return []string{}
+	}
+}
+
+func memHintFromTask(task *model.Task) scheduler.MemHint {
+	hint := scheduler.DefaultMemHint()
+	if task == nil || len(task.MemHint) == 0 {
+		return hint
+	}
+	raw, err := json.Marshal(task.MemHint)
+	if err != nil {
+		return hint
+	}
+	if err := json.Unmarshal(raw, &hint); err != nil {
+		return scheduler.DefaultMemHint()
+	}
+	_ = scheduler.ValidateMemHint(&hint)
+	return hint
+}
+
+func memHintToMap(hint scheduler.MemHint) map[string]any {
+	raw, _ := json.Marshal(hint)
+	var out map[string]any
+	_ = json.Unmarshal(raw, &out)
+	delete(out, "target_step_id")
+	delete(out, "semantic_query")
+	return out
+}
+
+func inferHintStrategy(query string) string {
+	lower := strings.ToLower(strings.TrimSpace(query))
+	if strings.Contains(lower, "relation") || strings.Contains(lower, "dependency") || strings.Contains(lower, "impact") {
+		return string(scheduler.MemHintStrategyGraphLocal)
+	}
+	if strings.Contains(lower, "task ") || strings.Contains(lower, "step ") {
+		return string(scheduler.MemHintStrategyKVPointGet)
+	}
+	return string(scheduler.MemHintStrategyNone)
 }
 
 type completeTaskRequest struct {
@@ -320,6 +466,29 @@ func (s *Server) completeTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if sessionID, ok := s.store.ResolveSessionIDByTaskID(task.TaskID); ok {
+		if req.Success && s.memory != nil {
+			snapshot, snapshotErr := s.store.GetSessionSnapshot(sessionID)
+			if snapshotErr == nil {
+				ingestErr := s.memory.Ingest(r.Context(), Mem3IngestRequest{
+					Version:        "1.0",
+					IdempotencyKey: "task-output:" + task.TaskID,
+					Kind:           "TASK_OUTPUT",
+					Scope: Mem3Scope{
+						TenantID: snapshot.DAG.TenantID, AgentID: snapshot.DAG.AgentID,
+						UserID: snapshot.Session.UserID, SessionID: sessionID, DAGID: task.DAGID,
+					},
+					Payload: Mem3TaskOutput{
+						TaskID: task.TaskID, ParentTaskIDs: task.Dependencies, Sequence: task.Sequence,
+						NodeType: string(task.NodeType), SkillName: task.SkillName, Output: req.RawData,
+						SkillSummary: req.Summary, CompletedAt: time.Now().UTC(),
+					},
+				})
+				if ingestErr != nil {
+					respondError(w, http.StatusBadGateway, "mem3_ingest_failed", ingestErr.Error())
+					return
+				}
+			}
+		}
 		eventType := "TASK_COMPLETED"
 		if !req.Success {
 			eventType = "TASK_FAILED"
@@ -354,11 +523,13 @@ type replanPatchRequest struct {
 }
 
 type replanTaskIn struct {
-	RefID        string         `json:"ref_id"`
-	NodeType     string         `json:"node_type"`
-	SkillName    string         `json:"skill_name"`
-	Parameters   map[string]any `json:"parameters"`
-	Dependencies []string       `json:"dependencies"`
+	RefID        string            `json:"ref_id"`
+	NodeType     string            `json:"node_type"`
+	SkillName    string            `json:"skill_name"`
+	Goal         string            `json:"goal"`
+	MemHint      scheduler.MemHint `json:"mem_hint"`
+	Parameters   map[string]any    `json:"parameters"`
+	Dependencies []string          `json:"dependencies"`
 }
 
 func (s *Server) applyReplanPatch(w http.ResponseWriter, r *http.Request) {
@@ -387,6 +558,8 @@ func (s *Server) applyReplanPatch(w http.ResponseWriter, r *http.Request) {
 			RefID:        task.RefID,
 			NodeType:     nt,
 			SkillName:    task.SkillName,
+			Goal:         task.Goal,
+			MemHint:      task.MemHint,
 			Parameters:   task.Parameters,
 			Dependencies: task.Dependencies,
 		})

@@ -24,6 +24,7 @@ type ModelRouter struct {
 type modelPlanRequest struct {
 	Intent           string         `json:"intent"`
 	PlanningMode     string         `json:"planning_mode"`
+	IntentContext    map[string]any `json:"intent_context,omitempty"`
 	Model            string         `json:"model"`
 	Schema           string         `json:"schema"`
 	RegisteredSkills []string       `json:"registered_skills,omitempty"`
@@ -58,6 +59,18 @@ func NewModelRouterFromEnv() *ModelRouter {
 }
 
 func (r *ModelRouter) Plan(intent string, planningMode string) (Plan, error) {
+	intentContext, err := r.ExtractIntent(intent, planningMode)
+	if err != nil {
+		return Plan{}, err
+	}
+	return r.PlanWithContext(intent, planningMode, intentContext)
+}
+
+func (r *ModelRouter) ExtractIntent(intent string, planningMode string) (map[string]any, error) {
+	return NewMockLightweightIntentModel().Extract(intent, planningMode), nil
+}
+
+func (r *ModelRouter) PlanWithContext(intent string, planningMode string, intentContext map[string]any) (Plan, error) {
 	if strings.TrimSpace(r.endpointURL) == "" {
 		return Plan{}, ErrModelPlannerUnavailable
 	}
@@ -65,6 +78,7 @@ func (r *ModelRouter) Plan(intent string, planningMode string) (Plan, error) {
 	reqBody, _ := json.Marshal(modelPlanRequest{
 		Intent:           intent,
 		PlanningMode:     planningMode,
+		IntentContext:    intentContext,
 		Model:            r.modelName,
 		Schema:           "arqo_plan_v1",
 		RegisteredSkills: append([]string{}, r.registeredSkills...),
@@ -113,6 +127,8 @@ func (r *ModelRouter) Plan(intent string, planningMode string) (Plan, error) {
 	}
 	if payload.IntentContext != nil {
 		plan.IntentContext = payload.IntentContext
+	} else {
+		plan.IntentContext = intentContext
 	}
 	return plan, nil
 }
@@ -129,9 +145,10 @@ func dagPlanJSONSchema() map[string]any {
 						"node_id": map[string]any{"type": "string"},
 						"node_type": map[string]any{
 							"type": "string",
-							"enum": []string{"SKILL_SINK", "EXPAND_PLANNING"},
+							"enum": []string{"skill", "planner"},
 						},
 						"skill_name": map[string]any{"type": "string"},
+						"goal":       map[string]any{"type": "string"},
 						"dependencies": map[string]any{
 							"type":  "array",
 							"items": map[string]any{"type": "string"},
@@ -141,15 +158,23 @@ func dagPlanJSONSchema() map[string]any {
 							"properties": map[string]any{
 								"strategy": map[string]any{
 									"type": "string",
-									"enum": []string{"KV_POINT_GET", "GRAPH_TRAVERSAL", "NONE"},
+									"enum": []string{"KV_POINT_GET", "GRAPH_LOCAL_TRAVERSAL", "GRAPH_GLOBAL_SUMMARY", "NONE"},
 								},
-								"target_step_id": map[string]any{"type": "string"},
-								"semantic_query": map[string]any{"type": "string"},
+								"version":       map[string]any{"type": "string", "const": "1.0"},
+								"target_system": map[string]any{"type": "string", "enum": []string{"AUTO", "MEM3_KV", "PLATO_GRAPH"}},
+								"query": map[string]any{
+									"type": "object",
+									"properties": map[string]any{
+										"text":           map[string]any{"type": "string"},
+										"keywords":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+										"target_task_id": map[string]any{"type": "string"},
+									},
+								},
 							},
-							"required": []string{"strategy"},
+							"required": []string{"version", "strategy"},
 						},
 					},
-					"required": []string{"node_id", "node_type", "dependencies"},
+					"required": []string{"node_id", "node_type", "mem_hint", "dependencies"},
 				},
 			},
 		},

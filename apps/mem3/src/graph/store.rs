@@ -6,22 +6,37 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(feature = "memgraph_bolt")]
-use neo4rs::{query, Graph};
+use neo4rs::{Graph, query};
 #[cfg(feature = "memgraph_bolt")]
 use tokio::sync::Mutex as AsyncMutex;
 #[cfg(feature = "memgraph_bolt")]
-use tokio::time::{sleep, timeout, Duration};
+use tokio::time::{Duration, sleep, timeout};
 
 use crate::model::types::{GraphEdge, GraphNode};
 
 pub trait GraphStore: Send + Sync {
-    fn upsert_graph(&self, user_id: &str, session_id: &str, dag_id: &str, nodes: &[GraphNode], edges: &[GraphEdge]);
+    fn upsert_graph(
+        &self,
+        user_id: &str,
+        session_id: &str,
+        dag_id: &str,
+        nodes: &[GraphNode],
+        edges: &[GraphEdge],
+    );
 }
 
 pub struct NoopGraphStore;
 
 impl GraphStore for NoopGraphStore {
-    fn upsert_graph(&self, _user_id: &str, _session_id: &str, _dag_id: &str, _nodes: &[GraphNode], _edges: &[GraphEdge]) {}
+    fn upsert_graph(
+        &self,
+        _user_id: &str,
+        _session_id: &str,
+        _dag_id: &str,
+        _nodes: &[GraphNode],
+        _edges: &[GraphEdge],
+    ) {
+    }
 }
 
 #[derive(Default)]
@@ -30,7 +45,14 @@ pub struct InMemoryGraphStore {
 }
 
 impl GraphStore for InMemoryGraphStore {
-    fn upsert_graph(&self, user_id: &str, session_id: &str, dag_id: &str, nodes: &[GraphNode], edges: &[GraphEdge]) {
+    fn upsert_graph(
+        &self,
+        user_id: &str,
+        session_id: &str,
+        dag_id: &str,
+        nodes: &[GraphNode],
+        edges: &[GraphEdge],
+    ) {
         let key = format!("{}:{}:{}", user_id, session_id, dag_id);
         if let Ok(mut guard) = self.inner.lock() {
             guard.insert(key, (nodes.to_vec(), edges.to_vec()));
@@ -49,7 +71,14 @@ impl MemgraphStubStore {
 }
 
 impl GraphStore for MemgraphStubStore {
-    fn upsert_graph(&self, user_id: &str, session_id: &str, dag_id: &str, nodes: &[GraphNode], edges: &[GraphEdge]) {
+    fn upsert_graph(
+        &self,
+        user_id: &str,
+        session_id: &str,
+        dag_id: &str,
+        nodes: &[GraphNode],
+        edges: &[GraphEdge],
+    ) {
         let observed_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -96,9 +125,9 @@ impl MemgraphBoltStore {
             user,
             pass,
             graph: Arc::new(AsyncMutex::new(None)),
-            retries: parse_positive_usize_env("POLARIS_MEMGRAPH_RETRIES", 2),
-            timeout_ms: parse_positive_u64_env("POLARIS_MEMGRAPH_TIMEOUT_MS", 1500),
-            retry_backoff_ms: parse_positive_u64_env("POLARIS_MEMGRAPH_RETRY_BACKOFF_MS", 100),
+            retries: parse_positive_usize_env("MEM3_MEMGRAPH_RETRIES", 2),
+            timeout_ms: parse_positive_u64_env("MEM3_MEMGRAPH_TIMEOUT_MS", 1500),
+            retry_backoff_ms: parse_positive_u64_env("MEM3_MEMGRAPH_RETRY_BACKOFF_MS", 100),
         }
     }
 
@@ -109,10 +138,11 @@ impl MemgraphBoltStore {
                 return Some(graph.clone());
             }
         }
-        let connected = match Graph::new(self.uri.clone(), self.user.clone(), self.pass.clone()).await {
-            Ok(g) => Arc::new(g),
-            Err(_) => return None,
-        };
+        let connected =
+            match Graph::new(self.uri.clone(), self.user.clone(), self.pass.clone()).await {
+                Ok(g) => Arc::new(g),
+                Err(_) => return None,
+            };
         let mut guard = self.graph.lock().await;
         *guard = Some(connected.clone());
         Some(connected)
@@ -176,7 +206,14 @@ impl MemgraphBoltStore {
 
 #[cfg(feature = "memgraph_bolt")]
 impl GraphStore for MemgraphBoltStore {
-    fn upsert_graph(&self, user_id: &str, session_id: &str, dag_id: &str, nodes: &[GraphNode], edges: &[GraphEdge]) {
+    fn upsert_graph(
+        &self,
+        user_id: &str,
+        session_id: &str,
+        dag_id: &str,
+        nodes: &[GraphNode],
+        edges: &[GraphEdge],
+    ) {
         let user_id = user_id.to_string();
         let session_id = session_id.to_string();
         let dag_id = dag_id.to_string();
@@ -224,20 +261,20 @@ impl GraphStore for MemgraphBoltStore {
 }
 
 pub fn build_graph_store_from_env() -> Arc<dyn GraphStore> {
-    let backend = env::var("POLARIS_GRAPH_BACKEND")
+    let backend = env::var("MEM3_GRAPH_BACKEND")
         .unwrap_or_else(|_| "noop".to_string())
         .to_lowercase();
     match backend.as_str() {
         "in_memory" => Arc::new(InMemoryGraphStore::default()),
         "memgraph_stub" => Arc::new(MemgraphStubStore::new(
-            env::var("POLARIS_MEMGRAPH_STUB_LOG")
-                .unwrap_or_else(|_| "/tmp/polaris-memgraph.cypher.log".to_string()),
+            env::var("MEM3_MEMGRAPH_STUB_LOG")
+                .unwrap_or_else(|_| "/tmp/mem3-memgraph.cypher.log".to_string()),
         )),
         #[cfg(feature = "memgraph_bolt")]
         "memgraph_bolt" => Arc::new(MemgraphBoltStore::new(
-            env::var("POLARIS_MEMGRAPH_URI").unwrap_or_else(|_| "127.0.0.1:7687".to_string()),
-            env::var("POLARIS_MEMGRAPH_USER").unwrap_or_else(|_| "neo4j".to_string()),
-            env::var("POLARIS_MEMGRAPH_PASS").unwrap_or_else(|_| "neo4j".to_string()),
+            env::var("MEM3_MEMGRAPH_URI").unwrap_or_else(|_| "127.0.0.1:7687".to_string()),
+            env::var("MEM3_MEMGRAPH_USER").unwrap_or_else(|_| "neo4j".to_string()),
+            env::var("MEM3_MEMGRAPH_PASS").unwrap_or_else(|_| "neo4j".to_string()),
         )),
         _ => Arc::new(NoopGraphStore),
     }
@@ -317,11 +354,11 @@ fn render_memgraph_edge_cypher(
 
 #[cfg(test)]
 mod tests {
-    use crate::graph::store::GraphStore;
     use super::{
-        append_lines, parse_positive_u64_env, parse_positive_usize_env, render_memgraph_edge_cypher,
-        render_memgraph_node_cypher, MemgraphStubStore,
+        MemgraphStubStore, append_lines, parse_positive_u64_env, parse_positive_usize_env,
+        render_memgraph_edge_cypher, render_memgraph_node_cypher,
     };
+    use crate::graph::store::GraphStore;
     use crate::model::types::{GraphEdge, GraphNode};
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -350,7 +387,7 @@ mod tests {
     #[test]
     fn memgraph_stub_should_write_cypher_log() {
         let path = format!(
-            "/tmp/polaris-memgraph-stub-{}.log",
+            "/tmp/mem3-memgraph-stub-{}.log",
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map(|d| d.as_nanos())
@@ -383,7 +420,7 @@ mod tests {
     #[test]
     fn append_lines_should_append_to_file() {
         let path = format!(
-            "/tmp/polaris-append-lines-{}.log",
+            "/tmp/mem3-append-lines-{}.log",
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map(|d| d.as_nanos())
@@ -398,7 +435,7 @@ mod tests {
 
     #[test]
     fn parse_positive_env_should_fallback_for_invalid_values() {
-        assert_eq!(parse_positive_usize_env("POLARIS_TEST_NO_SUCH_USIZE", 3), 3);
-        assert_eq!(parse_positive_u64_env("POLARIS_TEST_NO_SUCH_U64", 5), 5);
+        assert_eq!(parse_positive_usize_env("MEM3_TEST_NO_SUCH_USIZE", 3), 3);
+        assert_eq!(parse_positive_u64_env("MEM3_TEST_NO_SUCH_U64", 5), 5);
     }
 }

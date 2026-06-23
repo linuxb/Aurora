@@ -48,11 +48,13 @@ services:
       ARQO_MYSQL_DSN: "aurora:aurora@tcp(mysql:3306)/aurora?parseTime=true&multiStatements=true"
       ARQO_EVENT_BACKEND: "redis"
       ARQO_REDIS_ADDR: "redis:6379"
+      ARQO_MEM3_URL: "http://mem3:8082"
     ports:
       - "8080:8080"
     depends_on:
       - redis
       - mysql
+      - mem3
 
   worker-ts:
     image: node:22-alpine
@@ -67,15 +69,15 @@ services:
     depends_on:
       - arqo
 
-  polaris:
+  mem3:
     image: rust:1.90
-    container_name: aurora-polaris
-    working_dir: /workspace/apps/polaris
+    container_name: aurora-mem3
+    working_dir: /workspace/apps/mem3
     volumes:
       - ./:/workspace
     command: ["cargo", "run"]
     environment:
-      POLARIS_ADDR: "0.0.0.0:8082"
+      MEM3_ADDR: "0.0.0.0:8082"
     ports:
       - "8082:8082"
     depends_on:

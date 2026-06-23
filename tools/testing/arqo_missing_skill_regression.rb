@@ -71,8 +71,13 @@ def default_unmapped_expansion(task_id, node_id)
     new_nodes: [
       {
         node_id: node_id,
-        node_type: "EXPAND_PLANNING",
+        node_type: "planner",
         skill_name: "ReActPlanner",
+        goal: "continue planning for an unmapped capability",
+        mem_hint: {
+          version: "1.0",
+          strategy: "NONE"
+        },
         dependencies: [task_id]
       }
     ],
@@ -104,7 +109,7 @@ last_body = nil
 attempt = 1
 while attempt <= max_attempts
   next_planner = pull_task
-  assert!("next planner should be EXPAND_PLANNING") { next_planner["node_type"] == "EXPAND_PLANNING" }
+  assert!("next planner should be planner") { next_planner["node_type"] == "planner" }
 
   code_n, body_n = complete_success(
     next_planner.fetch("task_id"),

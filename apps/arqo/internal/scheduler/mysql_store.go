@@ -112,13 +112,13 @@ func (s *MySQLStore) CreateDemoSession(userID, intent string) (Snapshot, error) 
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	_, err = execSQLTx(tx, insertSessionBuilder(sessionID, dagID, userID, intent, now))
+	_, err = execSQLTx(tx, insertSessionBuilder(sessionID, dagID, userID, "aurora-default", userID, intent, now))
 	if err != nil {
 		return Snapshot{}, err
 	}
 
 	intentContextJSON, _ := json.Marshal(map[string]any{"original_intent": intent, "source": "demo"})
-	_, err = execSQLTx(tx, insertDAGBuilder(dagID, sessionID, userID, intent, string(intentContextJSON), now))
+	_, err = execSQLTx(tx, insertDAGBuilder(dagID, sessionID, userID, "aurora-default", userID, intent, string(intentContextJSON), now))
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -169,12 +169,12 @@ func (s *MySQLStore) CreateJITDemoSession(userID, intent string) (Snapshot, erro
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	_, err = execSQLTx(tx, insertSessionBuilder(sessionID, dagID, userID, intent, now))
+	_, err = execSQLTx(tx, insertSessionBuilder(sessionID, dagID, userID, "aurora-default", userID, intent, now))
 	if err != nil {
 		return Snapshot{}, err
 	}
 	intentContextJSON, _ := json.Marshal(map[string]any{"original_intent": intent, "source": "jit_demo"})
-	_, err = execSQLTx(tx, insertDAGBuilder(dagID, sessionID, userID, intent, string(intentContextJSON), now))
+	_, err = execSQLTx(tx, insertDAGBuilder(dagID, sessionID, userID, "aurora-default", userID, intent, string(intentContextJSON), now))
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -191,13 +191,34 @@ func (s *MySQLStore) CreateJITDemoSession(userID, intent string) (Snapshot, erro
 }
 
 func (s *MySQLStore) CreateSessionFromPlan(userID, intent string, intentContext map[string]any, tasks []SessionTaskSpec) (Snapshot, error) {
-	sessionID, err := newPrefixedID("sess")
-	if err != nil {
-		return Snapshot{}, err
+	return s.CreateSessionFromPreparedPlan(CreateSessionPlanInput{
+		TenantID:      userID,
+		AgentID:       "aurora-default",
+		UserID:        userID,
+		Intent:        intent,
+		IntentContext: intentContext,
+		Tasks:         tasks,
+	})
+}
+
+func (s *MySQLStore) CreateSessionFromPreparedPlan(input CreateSessionPlanInput) (Snapshot, error) {
+	identity := input.Identity
+	var err error
+	if identity.SessionID == "" || identity.DAGID == "" {
+		identity, err = NewSessionIdentity()
+		if err != nil {
+			return Snapshot{}, err
+		}
 	}
-	dagID, err := newPrefixedID("dag")
-	if err != nil {
-		return Snapshot{}, err
+	sessionID := identity.SessionID
+	dagID := identity.DAGID
+	tenantID := input.TenantID
+	if tenantID == "" {
+		tenantID = input.UserID
+	}
+	agentID := input.AgentID
+	if agentID == "" {
+		agentID = "aurora-default"
 	}
 	now := time.Now().UTC()
 
@@ -210,8 +231,8 @@ func (s *MySQLStore) CreateSessionFromPlan(userID, intent string, intentContext 
 		taskStatus string
 	}
 
-	refToTaskID := make(map[string]string, len(tasks))
-	for _, spec := range tasks {
+	refToTaskID := make(map[string]string, len(input.Tasks))
+	for _, spec := range input.Tasks {
 		id, idErr := newPrefixedID("task")
 		if idErr != nil {
 			return Snapshot{}, idErr
@@ -219,15 +240,15 @@ func (s *MySQLStore) CreateSessionFromPlan(userID, intent string, intentContext 
 		refToTaskID[spec.RefID] = id
 	}
 
-	childRefs := make(map[string][]string, len(tasks))
-	for _, spec := range tasks {
+	childRefs := make(map[string][]string, len(input.Tasks))
+	for _, spec := range input.Tasks {
 		for _, depRef := range spec.Dependencies {
 			childRefs[depRef] = append(childRefs[depRef], spec.RefID)
 		}
 	}
 
-	runtimeTasks := make([]runtimeTask, 0, len(tasks))
-	for _, spec := range tasks {
+	runtimeTasks := make([]runtimeTask, 0, len(input.Tasks))
+	for _, spec := range input.Tasks {
 		nodeType := spec.NodeType
 		parsedNodeType, parseErr := model.ParseNodeType(string(nodeType))
 		if parseErr != nil {
@@ -262,21 +283,21 @@ func (s *MySQLStore) CreateSessionFromPlan(userID, intent string, intentContext 
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	_, err = execSQLTx(tx, insertSessionBuilder(sessionID, dagID, userID, intent, now))
+	_, err = execSQLTx(tx, insertSessionBuilder(sessionID, dagID, tenantID, agentID, input.UserID, input.Intent, now))
 	if err != nil {
 		return Snapshot{}, err
 	}
-	intentContextJSON, _ := json.Marshal(cloneMap(intentContext))
-	_, err = execSQLTx(tx, insertDAGBuilder(dagID, sessionID, userID, intent, string(intentContextJSON), now))
+	intentContextJSON, _ := json.Marshal(cloneMap(input.IntentContext))
+	_, err = execSQLTx(tx, insertDAGBuilder(dagID, sessionID, tenantID, agentID, input.UserID, input.Intent, string(intentContextJSON), now))
 	if err != nil {
 		return Snapshot{}, err
 	}
-	for _, rt := range runtimeTasks {
+	for sequence, rt := range runtimeTasks {
 		params := rt.spec.Parameters
 		if rt.spec.NodeType == model.NodeTypeExpandPlanning {
-			params = injectIntentContext(params, intentContext)
+			params = injectIntentContext(params, input.IntentContext)
 		}
-		if err := s.insertTask(tx, rt.taskID, dagID, string(rt.spec.NodeType), rt.spec.SkillName, rt.taskStatus, rt.pending, rt.deps, rt.children, params, now); err != nil {
+		if err := s.insertTaskWithMetadata(tx, rt.taskID, dagID, int64(sequence), string(rt.spec.NodeType), rt.spec.SkillName, rt.spec.Goal, rt.spec.MemHint, rt.taskStatus, rt.pending, rt.deps, rt.children, params, now); err != nil {
 			return Snapshot{}, err
 		}
 	}
@@ -300,14 +321,14 @@ func (s *MySQLStore) ApplyReplanPatch(sessionID string, tasks []SessionTaskSpec,
 	var dag model.DAG
 	var rawIntentContext sql.NullString
 	row := tx.QueryRow(`
-SELECT d.dag_id, d.session_id, d.user_id, d.original_intent, d.intent_context_json, d.status, d.replan_count, d.current_depth, d.max_depth, d.jit_unmapped_streak, d.max_unmapped_streak, d.created_at
+SELECT d.dag_id, d.tenant_id, d.agent_id, d.session_id, d.user_id, d.original_intent, d.intent_context_json, d.status, d.replan_count, d.current_depth, d.max_depth, d.jit_unmapped_streak, d.max_unmapped_streak, d.created_at
 FROM dags d
 JOIN sessions s ON s.dag_id = d.dag_id
 WHERE s.session_id=?
 FOR UPDATE`, sessionID)
 	var dagStatus string
 	if err := row.Scan(
-		&dag.DAGID, &dag.SessionID, &dag.UserID, &dag.OriginalIntent, &rawIntentContext, &dagStatus,
+		&dag.DAGID, &dag.TenantID, &dag.AgentID, &dag.SessionID, &dag.UserID, &dag.OriginalIntent, &rawIntentContext, &dagStatus,
 		&dag.ReplanCount, &dag.CurrentDepth, &dag.MaxDepth, &dag.JITUnmappedStreak, &dag.MaxUnmappedStreak, &dag.CreatedAt,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -324,6 +345,10 @@ FOR UPDATE`, sessionID)
 	}
 
 	refToTaskID := make(map[string]string, len(tasks))
+	var nextSequence int64
+	if err := tx.QueryRow(`SELECT COALESCE(MAX(sequence), -1) + 1 FROM tasks WHERE dag_id=?`, dag.DAGID).Scan(&nextSequence); err != nil {
+		return Snapshot{}, err
+	}
 	for _, spec := range tasks {
 		id, idErr := newPrefixedID("task")
 		if idErr != nil {
@@ -382,9 +407,10 @@ FOR UPDATE`, sessionID)
 		if parsedNodeType == model.NodeTypeExpandPlanning {
 			params = injectIntentContext(params, dag.IntentContext)
 		}
-		if err := s.insertTask(tx, taskID, dag.DAGID, string(parsedNodeType), spec.SkillName, taskStatus, pending, deps, children, params, time.Now().UTC()); err != nil {
+		if err := s.insertTaskWithMetadata(tx, taskID, dag.DAGID, nextSequence, string(parsedNodeType), spec.SkillName, spec.Goal, spec.MemHint, taskStatus, pending, deps, children, params, time.Now().UTC()); err != nil {
 			return Snapshot{}, err
 		}
+		nextSequence++
 		for _, depID := range deps {
 			_, err := tx.Exec(`UPDATE tasks SET children_json = JSON_ARRAY_APPEND(children_json, '$', ?) WHERE task_id=? AND JSON_SEARCH(children_json, 'one', ?) IS NULL`, taskID, depID, taskID)
 			if err != nil {
@@ -570,7 +596,8 @@ func (s *MySQLStore) GetSessionSnapshot(sessionID string) (Snapshot, error) {
 
 	row := s.db.QueryRow(`
 SELECT s.session_id, s.dag_id, s.user_id, s.intent, s.created_at,
-       d.dag_id, d.session_id, d.user_id, d.original_intent, d.intent_context_json, d.status, d.replan_count, d.current_depth, d.max_depth, d.jit_unmapped_streak, d.max_unmapped_streak, d.created_at
+       s.tenant_id, s.agent_id,
+       d.dag_id, d.tenant_id, d.agent_id, d.session_id, d.user_id, d.original_intent, d.intent_context_json, d.status, d.replan_count, d.current_depth, d.max_depth, d.jit_unmapped_streak, d.max_unmapped_streak, d.created_at
 FROM sessions s
 JOIN dags d ON d.session_id = s.session_id
 WHERE s.session_id = ?`, sessionID)
@@ -578,7 +605,8 @@ WHERE s.session_id = ?`, sessionID)
 	var rawIntentContext sql.NullString
 	if err := row.Scan(
 		&session.SessionID, &session.DAGID, &session.UserID, &session.Intent, &session.CreatedAt,
-		&dag.DAGID, &dag.SessionID, &dag.UserID, &dag.OriginalIntent, &rawIntentContext, &dagStatus, &dag.ReplanCount, &dag.CurrentDepth, &dag.MaxDepth, &dag.JITUnmappedStreak, &dag.MaxUnmappedStreak, &dag.CreatedAt,
+		&session.TenantID, &session.AgentID,
+		&dag.DAGID, &dag.TenantID, &dag.AgentID, &dag.SessionID, &dag.UserID, &dag.OriginalIntent, &rawIntentContext, &dagStatus, &dag.ReplanCount, &dag.CurrentDepth, &dag.MaxDepth, &dag.JITUnmappedStreak, &dag.MaxUnmappedStreak, &dag.CreatedAt,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Snapshot{}, errors.New("session not found")
@@ -591,7 +619,7 @@ WHERE s.session_id = ?`, sessionID)
 	}
 
 	rows, err := s.db.Query(`
-SELECT task_id, dag_id, node_type, skill_name, status, pending_dependencies_count, owner_id, expire_at,
+SELECT task_id, dag_id, sequence, node_type, skill_name, goal, mem_hint_json, status, pending_dependencies_count, owner_id, expire_at,
        dependencies_json, children_json, parameters_json, last_summary, last_error_code, last_human_readable_error_msg
 FROM tasks
 WHERE dag_id = ?
@@ -652,6 +680,8 @@ func (s *MySQLStore) ensureSchema(ctx context.Context) error {
 CREATE TABLE IF NOT EXISTS sessions (
     session_id VARCHAR(64) PRIMARY KEY,
     dag_id VARCHAR(64) NOT NULL,
+    tenant_id VARCHAR(64) NOT NULL,
+    agent_id VARCHAR(64) NOT NULL,
     user_id VARCHAR(64) NOT NULL,
     intent TEXT NOT NULL,
     created_at DATETIME(6) NOT NULL
@@ -660,6 +690,8 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE TABLE IF NOT EXISTS dags (
     dag_id VARCHAR(64) PRIMARY KEY,
     session_id VARCHAR(64) NOT NULL,
+    tenant_id VARCHAR(64) NOT NULL,
+    agent_id VARCHAR(64) NOT NULL,
     user_id VARCHAR(64) NOT NULL,
     original_intent TEXT NOT NULL,
     intent_context_json LONGTEXT NULL,
@@ -676,8 +708,11 @@ CREATE TABLE IF NOT EXISTS dags (
 CREATE TABLE IF NOT EXISTS tasks (
     task_id VARCHAR(64) PRIMARY KEY,
     dag_id VARCHAR(64) NOT NULL,
-    node_type VARCHAR(32) NOT NULL DEFAULT 'SKILL_SINK',
-    skill_name VARCHAR(64) NOT NULL,
+    sequence BIGINT NOT NULL DEFAULT 0,
+    node_type VARCHAR(32) NOT NULL DEFAULT 'skill',
+    skill_name VARCHAR(64) NULL,
+    goal TEXT NULL,
+    mem_hint_json LONGTEXT NOT NULL,
     status VARCHAR(20) NOT NULL,
     pending_dependencies_count INT NOT NULL,
     owner_id VARCHAR(64) NULL,
@@ -704,8 +739,35 @@ CREATE TABLE IF NOT EXISTS task_raw_data (
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("ensure schema failed: %w", err)
 	}
-	if _, err := s.db.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS node_type VARCHAR(32) NOT NULL DEFAULT 'SKILL_SINK'`); err != nil {
+	if _, err := s.db.ExecContext(ctx, `ALTER TABLE sessions ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) NOT NULL DEFAULT 'default'`); err != nil {
+		return fmt.Errorf("ensure sessions tenant_id column failed: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `ALTER TABLE sessions ADD COLUMN IF NOT EXISTS agent_id VARCHAR(64) NOT NULL DEFAULT 'aurora-default'`); err != nil {
+		return fmt.Errorf("ensure sessions agent_id column failed: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `ALTER TABLE dags ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) NOT NULL DEFAULT 'default'`); err != nil {
+		return fmt.Errorf("ensure dags tenant_id column failed: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `ALTER TABLE dags ADD COLUMN IF NOT EXISTS agent_id VARCHAR(64) NOT NULL DEFAULT 'aurora-default'`); err != nil {
+		return fmt.Errorf("ensure dags agent_id column failed: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS sequence BIGINT NOT NULL DEFAULT 0`); err != nil {
+		return fmt.Errorf("ensure sequence column failed: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS node_type VARCHAR(32) NOT NULL DEFAULT 'skill'`); err != nil {
 		return fmt.Errorf("ensure node_type column failed: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS goal TEXT NULL`); err != nil {
+		return fmt.Errorf("ensure goal column failed: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `ALTER TABLE tasks MODIFY COLUMN skill_name VARCHAR(64) NULL`); err != nil {
+		return fmt.Errorf("make skill_name nullable failed: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS mem_hint_json LONGTEXT NULL`); err != nil {
+		return fmt.Errorf("ensure mem_hint_json column failed: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE tasks SET mem_hint_json='{"version":"1.0","strategy":"NONE"}' WHERE mem_hint_json IS NULL OR mem_hint_json=''`); err != nil {
+		return fmt.Errorf("backfill mem_hint_json failed: %w", err)
 	}
 	if _, err := s.db.ExecContext(ctx, `ALTER TABLE dags ADD COLUMN IF NOT EXISTS intent_context_json LONGTEXT NULL`); err != nil {
 		return fmt.Errorf("ensure intent_context_json column failed: %w", err)
@@ -716,17 +778,28 @@ CREATE TABLE IF NOT EXISTS task_raw_data (
 	if _, err := s.db.ExecContext(ctx, `ALTER TABLE dags ADD COLUMN IF NOT EXISTS max_unmapped_streak INT NOT NULL DEFAULT 3`); err != nil {
 		return fmt.Errorf("ensure max_unmapped_streak column failed: %w", err)
 	}
-	if _, err := s.db.ExecContext(ctx, `UPDATE tasks SET node_type='EXPAND_PLANNING' WHERE node_type='EXPANDING'`); err != nil {
+	if _, err := s.db.ExecContext(ctx, `UPDATE tasks SET node_type='planner' WHERE node_type IN ('EXPANDING', 'EXPAND_PLANNING')`); err != nil {
 		return fmt.Errorf("normalize node_type values failed: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE tasks SET node_type='skill' WHERE node_type='SKILL_SINK'`); err != nil {
+		return fmt.Errorf("normalize skill node_type values failed: %w", err)
 	}
 	return nil
 }
 
 func (s *MySQLStore) insertTask(tx *sql.Tx, taskID, dagID, nodeType, skillName, status string, pendingCount int, deps, children []string, params map[string]any, createdAt time.Time) error {
+	return s.insertTaskWithMetadata(
+		tx, taskID, dagID, 0, nodeType, skillName, "", DefaultMemHint(),
+		status, pendingCount, deps, children, params, createdAt,
+	)
+}
+
+func (s *MySQLStore) insertTaskWithMetadata(tx *sql.Tx, taskID, dagID string, sequence int64, nodeType, skillName, goal string, memHint MemHint, status string, pendingCount int, deps, children []string, params map[string]any, createdAt time.Time) error {
 	depsJSON, _ := json.Marshal(deps)
 	childrenJSON, _ := json.Marshal(children)
 	paramsJSON, _ := json.Marshal(params)
-	_, err := execSQLTx(tx, insertTaskBuilder(taskID, dagID, nodeType, skillName, status, pendingCount, string(depsJSON), string(childrenJSON), string(paramsJSON), createdAt))
+	memHintJSON, _ := json.Marshal(memHintMap(memHint))
+	_, err := execSQLTx(tx, insertTaskBuilder(taskID, dagID, sequence, nodeType, skillName, goal, string(memHintJSON), status, pendingCount, string(depsJSON), string(childrenJSON), string(paramsJSON), createdAt))
 	return err
 }
 
@@ -812,6 +885,10 @@ WHERE task_id=?`, planner.TaskID)
 
 	// Validate node IDs and dependencies.
 	newNodes := make(map[string]ExpansionNode, len(payload.NewNodes))
+	var nextSequence int64
+	if err := tx.QueryRow(`SELECT COALESCE(MAX(sequence), -1) + 1 FROM tasks WHERE dag_id=?`, planner.DAGID).Scan(&nextSequence); err != nil {
+		return err
+	}
 	for _, node := range payload.NewNodes {
 		if node.NodeID == "" || node.NodeType == "" {
 			return ErrExpansionInvalid
@@ -825,6 +902,9 @@ WHERE task_id=?`, planner.TaskID)
 			return ErrExpansionInvalid
 		}
 		if node.NodeType == model.NodeTypeExpandPlanning && node.SkillName != "" && node.SkillName != "ReActPlanner" {
+			return ErrExpansionInvalid
+		}
+		if node.NodeType == model.NodeTypePlanner && strings.TrimSpace(node.Goal) == "" {
 			return ErrExpansionInvalid
 		}
 		if err := ValidateMemHint(node.MemHint); err != nil {
@@ -898,9 +978,10 @@ WHERE task_id=?`, input.Summary, planner.TaskID)
 			}
 			params = injectIntentContext(params, intentContext)
 		}
-		if err := s.insertTask(tx, node.NodeID, planner.DAGID, string(node.NodeType), node.SkillName, status, pending, node.Dependencies, []string{}, params, time.Now().UTC()); err != nil {
+		if err := s.insertTaskWithMetadata(tx, node.NodeID, planner.DAGID, nextSequence, string(node.NodeType), node.SkillName, node.Goal, valueOrDefaultMemHint(node.MemHint), status, pending, node.Dependencies, []string{}, params, time.Now().UTC()); err != nil {
 			return err
 		}
+		nextSequence++
 	}
 
 	for _, node := range payload.NewNodes {
@@ -1013,8 +1094,9 @@ func scanTaskRow(row *sql.Row) (*model.Task, error) {
 	var task model.Task
 	var rawNodeType string
 	var status string
-	var depsJSON, childrenJSON string
+	var depsJSON, childrenJSON, memHintJSON string
 	var paramsJSON sql.NullString
+	var skillName, goal sql.NullString
 	var owner sql.NullString
 	var expireAt sql.NullTime
 	var lastSummary, lastErrorCode, lastHumanError sql.NullString
@@ -1022,8 +1104,11 @@ func scanTaskRow(row *sql.Row) (*model.Task, error) {
 	if err := row.Scan(
 		&task.TaskID,
 		&task.DAGID,
+		&task.Sequence,
 		&rawNodeType,
-		&task.SkillName,
+		&skillName,
+		&goal,
+		&memHintJSON,
 		&status,
 		&task.PendingDependenciesCount,
 		&owner,
@@ -1044,6 +1129,13 @@ func scanTaskRow(row *sql.Row) (*model.Task, error) {
 	}
 	task.NodeType = nodeType
 	task.Status = model.TaskStatus(status)
+	if skillName.Valid {
+		task.SkillName = skillName.String
+	}
+	if goal.Valid {
+		task.Goal = goal.String
+	}
+	_ = json.Unmarshal([]byte(memHintJSON), &task.MemHint)
 	if owner.Valid {
 		task.OwnerID = owner.String
 	}
@@ -1073,14 +1165,18 @@ func scanReadyTaskRow(row *sql.Row) (*model.Task, error) {
 	var task model.Task
 	var rawNodeType string
 	var status string
-	var depsJSON, childrenJSON string
+	var depsJSON, childrenJSON, memHintJSON string
 	var paramsJSON sql.NullString
+	var skillName, goal sql.NullString
 
 	if err := row.Scan(
 		&task.TaskID,
 		&task.DAGID,
+		&task.Sequence,
 		&rawNodeType,
-		&task.SkillName,
+		&skillName,
+		&goal,
+		&memHintJSON,
 		&status,
 		&task.PendingDependenciesCount,
 		&depsJSON,
@@ -1096,6 +1192,13 @@ func scanReadyTaskRow(row *sql.Row) (*model.Task, error) {
 	}
 	task.NodeType = nodeType
 	task.Status = model.TaskStatus(status)
+	if skillName.Valid {
+		task.SkillName = skillName.String
+	}
+	if goal.Valid {
+		task.Goal = goal.String
+	}
+	_ = json.Unmarshal([]byte(memHintJSON), &task.MemHint)
 	_ = json.Unmarshal([]byte(depsJSON), &task.Dependencies)
 	_ = json.Unmarshal([]byte(childrenJSON), &task.Children)
 	if paramsJSON.Valid && paramsJSON.String != "" && paramsJSON.String != "null" {
@@ -1116,8 +1219,9 @@ func scanTaskRows(rows *sql.Rows) (*model.Task, error) {
 	var task model.Task
 	var rawNodeType string
 	var status string
-	var depsJSON, childrenJSON string
+	var depsJSON, childrenJSON, memHintJSON string
 	var paramsJSON sql.NullString
+	var skillName, goal sql.NullString
 	var owner sql.NullString
 	var expireAt sql.NullTime
 	var lastSummary, lastErrorCode, lastHumanError sql.NullString
@@ -1125,8 +1229,11 @@ func scanTaskRows(rows *sql.Rows) (*model.Task, error) {
 	if err := rows.Scan(
 		&task.TaskID,
 		&task.DAGID,
+		&task.Sequence,
 		&rawNodeType,
-		&task.SkillName,
+		&skillName,
+		&goal,
+		&memHintJSON,
 		&status,
 		&task.PendingDependenciesCount,
 		&owner,
@@ -1147,6 +1254,13 @@ func scanTaskRows(rows *sql.Rows) (*model.Task, error) {
 	}
 	task.NodeType = nodeType
 	task.Status = model.TaskStatus(status)
+	if skillName.Valid {
+		task.SkillName = skillName.String
+	}
+	if goal.Valid {
+		task.Goal = goal.String
+	}
+	_ = json.Unmarshal([]byte(memHintJSON), &task.MemHint)
 	if owner.Valid {
 		task.OwnerID = owner.String
 	}

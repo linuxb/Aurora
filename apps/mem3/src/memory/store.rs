@@ -236,22 +236,22 @@ impl MemoryStore for RocksDbStore {
 }
 
 pub fn build_store_from_env() -> Arc<dyn MemoryStore> {
-    let backend = env::var("POLARIS_MEMORY_BACKEND")
+    let backend = env::var("MEM3_MEMORY_BACKEND")
         .unwrap_or_else(|_| "memory".to_string())
         .to_lowercase();
     match backend.as_str() {
         "rocksdb" => {
-            let path = env::var("POLARIS_MEMORY_ROCKSDB_PATH")
-                .unwrap_or_else(|_| "/tmp/polaris-rocksdb".to_string());
+            let path = env::var("MEM3_MEMORY_ROCKSDB_PATH")
+                .unwrap_or_else(|_| "/tmp/mem3-rocksdb".to_string());
             match RocksDbStore::open(&path) {
                 Ok(store) => Arc::new(store),
                 Err(_) => Arc::new(InMemoryStore::default()),
             }
         }
         "file_md" => {
-            let root = env::var("POLARIS_MEMORY_FS_DIR")
-                .unwrap_or_else(|_| "/tmp/polaris-memory".to_string());
-            let max_files_per_session = env::var("POLARIS_MEMORY_FS_MAX_FILES_PER_SESSION")
+            let root =
+                env::var("MEM3_MEMORY_FS_DIR").unwrap_or_else(|_| "/tmp/mem3-memory".to_string());
+            let max_files_per_session = env::var("MEM3_MEMORY_FS_MAX_FILES_PER_SESSION")
                 .ok()
                 .and_then(|v| v.parse::<usize>().ok())
                 .unwrap_or(200);
@@ -307,7 +307,11 @@ pub fn filter_entries(entries: Vec<MemoryEntry>, query: &SearchQuery) -> Vec<Mem
             continue;
         }
         if !normalized_q.is_empty() {
-            let hay = format!("{}\n{}", entry.summary.to_lowercase(), entry.raw_output.to_lowercase());
+            let hay = format!(
+                "{}\n{}",
+                entry.summary.to_lowercase(),
+                entry.raw_output.to_lowercase()
+            );
             if !hay.contains(&normalized_q) {
                 continue;
             }
@@ -325,7 +329,11 @@ pub fn fulltext_contains(entry: &MemoryEntry, q: &str) -> bool {
     if normalized.is_empty() {
         return true;
     }
-    let hay = format!("{}\n{}", entry.summary.to_lowercase(), entry.raw_output.to_lowercase());
+    let hay = format!(
+        "{}\n{}",
+        entry.summary.to_lowercase(),
+        entry.raw_output.to_lowercase()
+    );
     hay.contains(&normalized)
 }
 
@@ -342,9 +350,7 @@ pub fn extract_hard_facts(summary: &str, raw_output: &str) -> Vec<String> {
         out.push(format!("IP={}", cap.as_str()));
     }
     let error_terms = parse_csv_terms(
-        env::var("POLARIS_HARD_FACT_ERROR_TERMS")
-            .ok()
-            .as_deref(),
+        env::var("MEM3_HARD_FACT_ERROR_TERMS").ok().as_deref(),
         &["error", "timeout", "failed", "refused"],
     );
     let lower = text.to_lowercase();
@@ -380,8 +386,11 @@ pub fn dedup_keep_order(items: Vec<String>) -> Vec<String> {
     out
 }
 
-pub fn apply_rolling_reduce(store: &Arc<dyn MemoryStore>, mut incoming: MemoryEntry) -> MemoryEntry {
-    let threshold = env::var("POLARIS_ROLLING_TOKEN_THRESHOLD")
+pub fn apply_rolling_reduce(
+    store: &Arc<dyn MemoryStore>,
+    mut incoming: MemoryEntry,
+) -> MemoryEntry {
+    let threshold = env::var("MEM3_ROLLING_TOKEN_THRESHOLD")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
         .unwrap_or(2000);
@@ -393,12 +402,13 @@ pub fn apply_rolling_reduce(store: &Arc<dyn MemoryStore>, mut incoming: MemoryEn
         limit: 20,
     };
     let recent = store.search(&query);
-    let current_tokens = recent.iter().map(|e| e.summary.len() / 4).sum::<usize>() + incoming.summary.len() / 4;
+    let current_tokens =
+        recent.iter().map(|e| e.summary.len() / 4).sum::<usize>() + incoming.summary.len() / 4;
     if current_tokens <= threshold {
         return incoming;
     }
 
-    query.limit = env::var("POLARIS_ROLLING_WINDOW")
+    query.limit = env::var("MEM3_ROLLING_WINDOW")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
         .unwrap_or(5);
@@ -474,7 +484,11 @@ fn parse_markdown_entry(input: &str) -> Option<MemoryEntry> {
                         rels = value
                             .split('|')
                             .filter_map(|v| {
-                                let items = v.trim().split('>').map(|s| s.trim().to_string()).collect::<Vec<_>>();
+                                let items = v
+                                    .trim()
+                                    .split('>')
+                                    .map(|s| s.trim().to_string())
+                                    .collect::<Vec<_>>();
                                 if items.len() == 3 {
                                     Some([items[0].clone(), items[1].clone(), items[2].clone()])
                                 } else {
@@ -554,8 +568,8 @@ fn walk_markdown_files(root: &Path, f: &mut dyn FnMut(&Path)) {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_rolling_reduce, dedup_keep_order, extract_hard_facts, filter_entries, InMemoryStore,
-        MemoryStore, RocksDbStore, SearchQuery, parse_csv_terms,
+        InMemoryStore, MemoryStore, RocksDbStore, SearchQuery, apply_rolling_reduce,
+        dedup_keep_order, extract_hard_facts, filter_entries, parse_csv_terms,
     };
     use crate::model::types::MemoryEntry;
     use std::fs;
@@ -632,7 +646,10 @@ mod tests {
         );
         assert!(got.summary.starts_with("[rolling]"));
         assert!(got.hard_facts.contains(&"IP=1.1.1.1".to_string()));
-        assert!(got.hard_facts.contains(&"HAS_ERROR_SIGNAL=true".to_string()));
+        assert!(
+            got.hard_facts
+                .contains(&"HAS_ERROR_SIGNAL=true".to_string())
+        );
     }
 
     #[test]
@@ -657,7 +674,7 @@ mod tests {
     #[test]
     fn rocksdb_store_should_ingest_and_search() {
         let root = format!(
-            "/tmp/polaris-rocksdb-test-{}",
+            "/tmp/mem3-rocksdb-test-{}",
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map(|d| d.as_nanos())
@@ -689,7 +706,7 @@ mod tests {
     #[test]
     fn rocksdb_prefix_search_should_scope_and_keep_recent_first() {
         let root = format!(
-            "/tmp/polaris-rocksdb-prefix-test-{}",
+            "/tmp/mem3-rocksdb-prefix-test-{}",
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map(|d| d.as_nanos())

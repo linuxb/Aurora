@@ -23,17 +23,21 @@ func (r *failingRouter) Plan(_ string, _ string) (planner.Plan, error) {
 	return planner.Plan{}, errors.New("planner unavailable")
 }
 
-type fakeMemorySearcher struct {
-	entries []MemoryEntry
-	err     error
+type fakeMemoryClient struct {
+	ingests  []Mem3IngestRequest
+	searches []Mem3SearchRequest
+	response Mem3SearchResponse
+	err      error
 }
 
-func (m *fakeMemorySearcher) Search(_ string, _ string, _ string, _ int) ([]MemoryEntry, error) {
-	return m.entries, m.err
+func (m *fakeMemoryClient) Ingest(_ context.Context, req Mem3IngestRequest) error {
+	m.ingests = append(m.ingests, req)
+	return m.err
 }
 
-func (m *fakeMemorySearcher) SearchByHint(_ string, _ string, _ string, _ int) ([]MemoryEntry, error) {
-	return m.entries, m.err
+func (m *fakeMemoryClient) Search(_ context.Context, req Mem3SearchRequest) (Mem3SearchResponse, error) {
+	m.searches = append(m.searches, req)
+	return m.response, m.err
 }
 
 func TestCreateSessionRejectsInvalidPlan(t *testing.T) {
@@ -93,11 +97,7 @@ func TestCreateSessionPlanPayloadCompatibilityBaseline(t *testing.T) {
 		scheduler.NewStore(),
 		events.NewMemoryBroker(),
 		planner.NewMockRouter(),
-		&fakeMemorySearcher{
-			entries: []MemoryEntry{
-				{UserID: "u-plan-compat", SessionID: "old_sess", TaskID: "old_task", Summary: "recent payment incident"},
-			},
-		},
+		&fakeMemoryClient{},
 	)
 	mux := http.NewServeMux()
 	server.Register(mux)
@@ -154,15 +154,12 @@ func TestCreateSessionPlanPayloadCompatibilityBaseline(t *testing.T) {
 }
 
 func TestPullTaskInjectsPlannerMemHintAndMemoryHits(t *testing.T) {
+	memory := &fakeMemoryClient{}
 	server := NewServerWithPlannerAndMemory(
 		scheduler.NewStore(),
 		events.NewMemoryBroker(),
 		planner.NewMockRouter(),
-		&fakeMemorySearcher{
-			entries: []MemoryEntry{
-				{UserID: "u-mem", SessionID: "s1", TaskID: "t1", Summary: "recent failure context"},
-			},
-		},
+		memory,
 	)
 	mux := http.NewServeMux()
 	server.Register(mux)
@@ -198,8 +195,61 @@ func TestPullTaskInjectsPlannerMemHintAndMemoryHits(t *testing.T) {
 	if _, ok := params["mem_hint"]; !ok {
 		t.Fatalf("expected mem_hint in planner parameters: %v", params)
 	}
-	if _, ok := params["memory_hits"]; !ok {
-		t.Fatalf("expected memory_hits in planner parameters: %v", params)
+	if _, ok := params["working_memory"]; !ok {
+		t.Fatalf("expected working_memory in planner parameters: %v", params)
+	}
+	if len(memory.ingests) != 1 || memory.ingests[0].Kind != "DAG_CONTEXT" {
+		t.Fatalf("expected DAG_CONTEXT ingest before execution, got=%v", memory.ingests)
+	}
+	if len(memory.searches) != 1 {
+		t.Fatalf("expected one Mem3 search before dispatch, got=%d", len(memory.searches))
+	}
+	search := memory.searches[0]
+	if search.Scope.TenantID != "u-mem" || search.CurrentTask.TaskID == "" || search.MemHint.Version != "1.0" {
+		t.Fatalf("unexpected Mem3 search envelope: %+v", search)
+	}
+}
+
+func TestCompleteTaskIngestsTaskOutputToMem3(t *testing.T) {
+	memory := &fakeMemoryClient{}
+	server := NewServerWithPlannerAndMemory(
+		scheduler.NewStore(), events.NewMemoryBroker(), planner.NewMockRouter(), memory,
+	)
+	mux := http.NewServeMux()
+	server.Register(mux)
+
+	createRaw, _ := json.Marshal(map[string]any{"user_id": "u-output", "intent": "summarize logs"})
+	createRes := httptest.NewRecorder()
+	mux.ServeHTTP(createRes, httptest.NewRequest(http.MethodPost, "/v1/sessions", bytes.NewReader(createRaw)))
+	if createRes.Code != http.StatusCreated {
+		t.Fatalf("create failed: %d %s", createRes.Code, createRes.Body.String())
+	}
+
+	pullRaw, _ := json.Marshal(map[string]any{"worker_id": "w-output"})
+	pullRes := httptest.NewRecorder()
+	mux.ServeHTTP(pullRes, httptest.NewRequest(http.MethodPost, "/v1/tasks/pull", bytes.NewReader(pullRaw)))
+	var task model.Task
+	if err := json.Unmarshal(pullRes.Body.Bytes(), &task); err != nil {
+		t.Fatalf("decode task: %v", err)
+	}
+
+	completeRaw, _ := json.Marshal(map[string]any{
+		"worker_id": "w-output", "success": true, "summary": "done",
+		"raw_data": map[string]any{"records": 3},
+	})
+	completeRes := httptest.NewRecorder()
+	mux.ServeHTTP(completeRes, httptest.NewRequest(
+		http.MethodPost, "/v1/tasks/"+task.TaskID+"/complete", bytes.NewReader(completeRaw),
+	))
+	if completeRes.Code != http.StatusOK {
+		t.Fatalf("complete failed: %d %s", completeRes.Code, completeRes.Body.String())
+	}
+	if len(memory.ingests) != 2 || memory.ingests[1].Kind != "TASK_OUTPUT" {
+		t.Fatalf("expected DAG_CONTEXT and TASK_OUTPUT ingests, got=%v", memory.ingests)
+	}
+	payload, ok := memory.ingests[1].Payload.(Mem3TaskOutput)
+	if !ok || payload.TaskID != task.TaskID || payload.NodeType != "skill" {
+		t.Fatalf("unexpected task output payload: %#v", memory.ingests[1].Payload)
 	}
 }
 
@@ -346,13 +396,13 @@ func TestApplyReplanPatchEndpoint(t *testing.T) {
 		"tasks": []map[string]any{
 			{
 				"ref_id":       "patch_root",
-				"node_type":    "SKILL_SINK",
+				"node_type":    "skill",
 				"skill_name":   "QueryLog",
 				"dependencies": []string{},
 			},
 			{
 				"ref_id":       "patch_finish",
-				"node_type":    "SKILL_SINK",
+				"node_type":    "skill",
 				"skill_name":   "SendEmail",
 				"dependencies": []string{"patch_root"},
 			},

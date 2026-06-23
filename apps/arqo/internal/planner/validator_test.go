@@ -98,7 +98,7 @@ func TestValidateDAG_MissingNodeType(t *testing.T) {
 
 func TestValidateDAG_ExpandingNodeMustUsePlannerSkill(t *testing.T) {
 	result := ValidateDAG([]Node{
-		{NodeID: "a", NodeType: model.NodeTypeExpandPlanning, SkillName: "QueryLog"},
+		{NodeID: "a", NodeType: model.NodeTypeExpandPlanning, SkillName: "QueryLog", Goal: "investigate"},
 	})
 	if result.Valid {
 		t.Fatal("expected invalid result")
@@ -110,7 +110,7 @@ func TestValidateDAG_ExpandingNodeMustUsePlannerSkill(t *testing.T) {
 
 func TestValidateDAG_ExpandingNodeAllowsEmptySkillName(t *testing.T) {
 	result := ValidateDAG([]Node{
-		{NodeID: "planner", NodeType: model.NodeTypeExpandPlanning, SkillName: ""},
+		{NodeID: "planner", NodeType: model.NodeTypeExpandPlanning, SkillName: "", Goal: "investigate"},
 		{NodeID: "sink", NodeType: model.NodeTypeSkillSink, SkillName: "SendEmail", Dependencies: []string{"planner"}},
 	})
 	if !result.Valid {

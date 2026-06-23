@@ -121,7 +121,10 @@ fn extract_typed_entities(summary: &str) -> Vec<TypedEntity> {
 
 fn infer_entity_type(raw: &str) -> String {
     let lower = raw.to_lowercase();
-    if Regex::new(r"^t\d+$").expect("invalid regex").is_match(&lower) {
+    if Regex::new(r"^t\d+$")
+        .expect("invalid regex")
+        .is_match(&lower)
+    {
         return "task".to_string();
     }
     if Regex::new(r"^\d{4}(-\d{2}){0,2}$")
@@ -143,7 +146,7 @@ fn get_status_terms() -> &'static HashSet<String> {
     static STATUS_TERMS: OnceLock<HashSet<String>> = OnceLock::new();
     STATUS_TERMS.get_or_init(|| {
         parse_terms(
-            env::var("POLARIS_GRAPH_STATUS_TERMS").ok().as_deref(),
+            env::var("MEM3_GRAPH_STATUS_TERMS").ok().as_deref(),
             &[
                 "success",
                 "failed",
@@ -161,8 +164,10 @@ fn get_system_terms() -> &'static HashSet<String> {
     static SYSTEM_TERMS: OnceLock<HashSet<String>> = OnceLock::new();
     SYSTEM_TERMS.get_or_init(|| {
         parse_terms(
-            env::var("POLARIS_GRAPH_SYSTEM_TERMS").ok().as_deref(),
-            &["mysql", "tidb", "redis", "kvrocks", "docker", "http", "grpc"],
+            env::var("MEM3_GRAPH_SYSTEM_TERMS").ok().as_deref(),
+            &[
+                "mysql", "tidb", "redis", "kvrocks", "docker", "http", "grpc",
+            ],
         )
     })
 }

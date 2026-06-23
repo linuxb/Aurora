@@ -13,8 +13,11 @@ var mysqlBuilder = sq.StatementBuilder.PlaceholderFormat(sq.Question)
 var mysqlReadyTaskColumns = []string{
 	"task_id",
 	"dag_id",
+	"sequence",
 	"node_type",
 	"skill_name",
+	"goal",
+	"mem_hint_json",
 	"status",
 	"pending_dependencies_count",
 	"dependencies_json",
@@ -25,8 +28,11 @@ var mysqlReadyTaskColumns = []string{
 var mysqlTaskColumns = []string{
 	"task_id",
 	"dag_id",
+	"sequence",
 	"node_type",
 	"skill_name",
+	"goal",
+	"mem_hint_json",
 	"status",
 	"pending_dependencies_count",
 	"owner_id",
@@ -67,17 +73,19 @@ func queryRowSQLTx(tx *sql.Tx, builder mysqlSQLizer) *sql.Row {
 	return tx.QueryRow(query, args...)
 }
 
-func insertSessionBuilder(sessionID, dagID, userID, intent string, createdAt time.Time) mysqlSQLizer {
+func insertSessionBuilder(sessionID, dagID, tenantID, agentID, userID, intent string, createdAt time.Time) mysqlSQLizer {
 	return mysqlBuilder.Insert("sessions").
-		Columns("session_id", "dag_id", "user_id", "intent", "created_at").
-		Values(sessionID, dagID, userID, intent, createdAt)
+		Columns("session_id", "dag_id", "tenant_id", "agent_id", "user_id", "intent", "created_at").
+		Values(sessionID, dagID, tenantID, agentID, userID, intent, createdAt)
 }
 
-func insertDAGBuilder(dagID, sessionID, userID, intent, intentContextJSON string, createdAt time.Time) mysqlSQLizer {
+func insertDAGBuilder(dagID, sessionID, tenantID, agentID, userID, intent, intentContextJSON string, createdAt time.Time) mysqlSQLizer {
 	return mysqlBuilder.Insert("dags").
 		Columns(
 			"dag_id",
 			"session_id",
+			"tenant_id",
+			"agent_id",
 			"user_id",
 			"original_intent",
 			"intent_context_json",
@@ -89,16 +97,19 @@ func insertDAGBuilder(dagID, sessionID, userID, intent, intentContextJSON string
 			"max_unmapped_streak",
 			"created_at",
 		).
-		Values(dagID, sessionID, userID, intent, intentContextJSON, model.DAGStatusRunning, 0, 1, 10, 0, 3, createdAt)
+		Values(dagID, sessionID, tenantID, agentID, userID, intent, intentContextJSON, model.DAGStatusRunning, 0, 1, 10, 0, 3, createdAt)
 }
 
-func insertTaskBuilder(taskID, dagID, nodeType, skillName, status string, pendingCount int, depsJSON, childrenJSON, paramsJSON string, createdAt time.Time) mysqlSQLizer {
+func insertTaskBuilder(taskID, dagID string, sequence int64, nodeType, skillName, goal, memHintJSON, status string, pendingCount int, depsJSON, childrenJSON, paramsJSON string, createdAt time.Time) mysqlSQLizer {
 	return mysqlBuilder.Insert("tasks").
 		Columns(
 			"task_id",
 			"dag_id",
+			"sequence",
 			"node_type",
 			"skill_name",
+			"goal",
+			"mem_hint_json",
 			"status",
 			"pending_dependencies_count",
 			"dependencies_json",
@@ -106,7 +117,7 @@ func insertTaskBuilder(taskID, dagID, nodeType, skillName, status string, pendin
 			"parameters_json",
 			"created_at",
 		).
-		Values(taskID, dagID, nodeType, skillName, status, pendingCount, depsJSON, childrenJSON, paramsJSON, createdAt)
+		Values(taskID, dagID, sequence, nodeType, skillName, goal, memHintJSON, status, pendingCount, depsJSON, childrenJSON, paramsJSON, createdAt)
 }
 
 func selectReadyTaskForUpdateBuilder() mysqlSQLizer {

@@ -1,14 +1,14 @@
 SHELL := /bin/zsh
 GOCACHE ?= $(CURDIR)/.cache/go-build
 
-.PHONY: help run-arqo run-worker run-polaris test-arqo test-polaris test check-env infra-up infra-down infra-up-dev infra-down-dev infra-up-full infra-down-full test-smoke-ruby test-fault-ruby test-missing-skill-ruby test-self-heal-ruby test-self-heal-persistent-ruby test-regression-ruby hardening-regression hardening-tidb
+.PHONY: help run-arqo run-worker run-mem3 test-arqo test-mem3 test check-env infra-up infra-down infra-up-dev infra-down-dev infra-up-full infra-down-full test-smoke-ruby test-fault-ruby test-missing-skill-ruby test-self-heal-ruby test-self-heal-persistent-ruby test-regression-ruby hardening-regression hardening-tidb
 
 help:
 	@echo "Targets:"
 	@echo "  run-arqo      - run Go gateway arqo"
 	@echo "  run-worker    - run TypeScript worker"
-	@echo "  run-polaris   - run Rust memory controller"
-	@echo "  test          - run arqo/polaris tests"
+	@echo "  run-mem3      - run Rust memory controller"
+	@echo "  test          - run arqo/mem3 tests"
 	@echo "  check-env     - check go/rust/node/docker toolchain"
 	@echo "  infra-up      - start dev infra dependencies only (mysql/redis/kvrocks/memgraph)"
 	@echo "  infra-down    - stop dev infra dependencies"
@@ -30,17 +30,17 @@ run-arqo:
 run-worker:
 	cd apps/worker-ts && npm run dev
 
-run-polaris:
-	cd apps/polaris && cargo run
+run-mem3:
+	cd apps/mem3 && cargo run
 
 test-arqo:
 	mkdir -p $(GOCACHE)
 	cd apps/arqo && GOCACHE=$(GOCACHE) go test ./...
 
-test-polaris:
-	cd apps/polaris && cargo test
+test-mem3:
+	cd apps/mem3 && cargo test
 
-test: test-arqo test-polaris
+test: test-arqo test-mem3
 
 check-env:
 	@echo "Go:" && go version

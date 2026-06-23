@@ -13,17 +13,23 @@ export interface ExpansionPayload {
 
 export interface ExpansionNode {
   node_id: string;
-  node_type: "SKILL_SINK" | "EXPAND_PLANNING";
-  skill_name: string;
+  node_type: "skill" | "planner";
+  skill_name?: string;
+  goal?: string;
   mem_hint?: MemHint;
   parameters?: Record<string, unknown>;
   dependencies: string[];
 }
 
 export interface MemHint {
-  strategy: "KV_POINT_GET" | "GRAPH_TRAVERSAL" | "NONE";
-  target_step_id?: string;
-  semantic_query?: string;
+  version: "1.0";
+  target_system?: "AUTO" | "MEM3_KV" | "PLATO_GRAPH";
+  strategy: "KV_POINT_GET" | "GRAPH_LOCAL_TRAVERSAL" | "GRAPH_GLOBAL_SUMMARY" | "NONE";
+  query?: {
+    text?: string;
+    keywords?: string[];
+    target_task_id?: string;
+  };
 }
 
 export interface DownstreamWiring {
@@ -58,8 +64,11 @@ export type TelemetryEventType =
 export interface Task {
   task_id: string;
   dag_id: string;
-  node_type: "SKILL_SINK" | "EXPAND_PLANNING";
-  skill_name: string;
+  sequence: number;
+  node_type: "skill" | "planner";
+  skill_name?: string;
+  goal?: string;
+  mem_hint: MemHint;
   status: "PENDING" | "READY" | "RUNNING" | "SUCCESS" | "FAILED";
   pending_dependencies_count: number;
   parameters?: Record<string, unknown>;

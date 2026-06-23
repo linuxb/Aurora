@@ -1,9 +1,9 @@
-# <img src="img/icon.png" height="64" style="vertical-align: middle;" /> Aurora Agentic Service (MVP Scaffold)
+# <img src="img/icon.png" height="64" style="vertical-align: middle;" /> Aurora Agentic Garden (MVP Scaffold)
 
-This repository contains a runnable multi-language MVP scaffold for the Aurora Agentic Service:
+This repository contains a runnable multi-language MVP scaffold for the Aurora Agentic Garden:
 - `arqo` (Go): gateway + DAG scheduler core
 - `worker-ts` (TypeScript): skill runner with semantic error contract
-- `polaris` (Rust): memory controller (MVP in-memory store)
+- `mem3` (Rust): versioned memory data plane with KV/Graph retrieval
 
 ## Quick Start
 
@@ -16,14 +16,14 @@ make check-env
 ```bash
 make run-arqo
 make run-worker
-make run-polaris
+make run-mem3
 ```
 
 ### 3) Create a session and trigger DAG
 ```bash
 curl -sS http://127.0.0.1:8080/v1/sessions \
   -H 'content-type: application/json' \
-  -d '{"user_id":"u_demo","intent":"summarize logs and email report"}' | jq
+  -d '{"tenant_id":"tenant_demo","agent_id":"agent_demo","user_id":"u_demo","intent":"summarize logs and email report"}' | jq
 ```
 
 Then check the session status:
@@ -67,11 +67,11 @@ make test-fault-ruby
 
 ## Engineering Notes
 
-- The current scheduler store is in-memory for fast local iteration.
-- The interface contracts already follow the design docs (`READY/PENDING`, semantic errors, dual-track skill output).
-- Next phases can swap in MySQL/TiDB, Redis, and graph DB behind stable interfaces.
+- Arqo supports in-memory and MySQL/TiDB-compatible scheduler stores.
+- Arqo writes `DAG_CONTEXT` and successful `TASK_OUTPUT` events to Mem3.
+- Every leased task receives Mem3 working memory plus directed retrieval based on its canonical `mem_hint`.
 
-See roadmap: `doc/progress/Phase-Plan.md`.
+See roadmap: `doc/plan/Phase-Plan.md`.
 TypeScript setup guide: `doc/dev/Dev-Environment.md`.
 Decision traceability: `doc/progress/Decision-Log.md`.
 Phase 0 progress: `doc/progress/Phase-0-Progress.md`.

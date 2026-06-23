@@ -69,26 +69,34 @@ const reactPlanner: SkillRunner = async (taskID, parameters) => {
       new_nodes: [
         {
           node_id: collectA,
-          node_type: "SKILL_SINK",
+          node_type: "skill",
           skill_name: "QueryLog",
           parameters: { source: "payment-api" },
           dependencies: [taskID],
         },
         {
           node_id: collectB,
-          node_type: "SKILL_SINK",
+          node_type: "skill",
           skill_name: "QueryLog",
           parameters: { source: "payment-db" },
           dependencies: [taskID],
         },
         {
           node_id: followupPlanner,
-          node_type: "EXPAND_PLANNING",
+          node_type: "planner",
           skill_name: "ReActPlanner",
+          goal: "Synthesize collected evidence and decide the final delivery path.",
           mem_hint: {
-            strategy: "GRAPH_TRAVERSAL",
-            semantic_query: String(memHint.semantic_query ?? "recent dependency context"),
-            target_step_id: String(memHint.target_step_id ?? collectA),
+            version: "1.0",
+            target_system: "PLATO_GRAPH",
+            strategy: "GRAPH_LOCAL_TRAVERSAL",
+            query: {
+              text: String(
+                (memHint.query as Record<string, unknown> | undefined)?.text ??
+                  "recent dependency context",
+              ),
+              target_task_id: collectA,
+            },
           },
           parameters: { from: "reactPlanner", intent_context: intentContext, mem_hint: memHint },
           dependencies: [collectA, collectB],

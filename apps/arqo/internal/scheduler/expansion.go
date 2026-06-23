@@ -8,7 +8,7 @@ import "aurora/apps/arqo/internal/model"
 var (
 	ErrExpansionInvalid        = errors.New("expansion payload is invalid")
 	ErrExpansionDepthExceeded  = errors.New("expansion max depth reached")
-	ErrExpansionNotAllowed     = errors.New("expansion is only allowed for expanding steps")
+	ErrExpansionNotAllowed     = errors.New("expansion is only allowed for planner nodes")
 	ErrExpansionNotImplemented = errors.New("expansion is not implemented for this scheduler backend")
 	ErrSkillMappingExhausted   = errors.New("skill mapping exhausted, missing required skill")
 )
@@ -28,7 +28,8 @@ type ExpansionPayload struct {
 type ExpansionNode struct {
 	NodeID       string         `json:"node_id"`
 	NodeType     model.NodeType `json:"node_type"`
-	SkillName    string         `json:"skill_name"`
+	SkillName    string         `json:"skill_name,omitempty"`
+	Goal         string         `json:"goal,omitempty"`
 	MemHint      *MemHint       `json:"mem_hint,omitempty"`
 	Parameters   map[string]any `json:"parameters,omitempty"`
 	Dependencies []string       `json:"dependencies"`

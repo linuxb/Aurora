@@ -21,7 +21,7 @@ func newMockMySQLStore(t *testing.T) (*MySQLStore, sqlmock.Sqlmock, func()) {
 }
 
 func expectReadyTaskQuery(mock sqlmock.Sqlmock, rows *sqlmock.Rows) {
-	mock.ExpectQuery(`SELECT task_id, dag_id, node_type, skill_name, status, pending_dependencies_count, dependencies_json, children_json, parameters_json`).
+	mock.ExpectQuery(`SELECT task_id, dag_id, sequence, node_type, skill_name, goal, mem_hint_json, status, pending_dependencies_count, dependencies_json, children_json, parameters_json`).
 		WillReturnRows(rows)
 }
 
@@ -29,8 +29,11 @@ func readyTaskRows() *sqlmock.Rows {
 	return sqlmock.NewRows([]string{
 		"task_id",
 		"dag_id",
+		"sequence",
 		"node_type",
 		"skill_name",
+		"goal",
+		"mem_hint_json",
 		"status",
 		"pending_dependencies_count",
 		"dependencies_json",
@@ -47,8 +50,11 @@ func TestMySQLStorePullReadyTaskSuccess(t *testing.T) {
 	expectReadyTaskQuery(mock, readyTaskRows().AddRow(
 		"task_1",
 		"dag_1",
-		"SKILL_SINK",
+		0,
+		"skill",
 		"QueryLog",
+		nil,
+		`{"version":"1.0","strategy":"NONE"}`,
 		"READY",
 		0,
 		`[]`,

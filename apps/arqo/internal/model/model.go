@@ -27,17 +27,21 @@ const (
 )
 
 const (
-	NodeTypeSkillSink      NodeType = "SKILL_SINK"
-	NodeTypeExpandPlanning NodeType = "EXPAND_PLANNING"
+	NodeTypeSkill   NodeType = "skill"
+	NodeTypePlanner NodeType = "planner"
+
+	// Deprecated aliases retained for source compatibility during the migration.
+	NodeTypeSkillSink      = NodeTypeSkill
+	NodeTypeExpandPlanning = NodeTypePlanner
 )
 
 func ParseNodeType(raw string) (NodeType, error) {
-	normalized := strings.ToUpper(strings.TrimSpace(raw))
+	normalized := strings.ToLower(strings.TrimSpace(raw))
 	switch normalized {
-	case string(NodeTypeSkillSink):
-		return NodeTypeSkillSink, nil
-	case string(NodeTypeExpandPlanning):
-		return NodeTypeExpandPlanning, nil
+	case string(NodeTypeSkill), "skill_sink":
+		return NodeTypeSkill, nil
+	case string(NodeTypePlanner), "expand_planning", "expanding":
+		return NodeTypePlanner, nil
 	default:
 		return "", fmt.Errorf("invalid node_type %q", raw)
 	}
@@ -45,6 +49,8 @@ func ParseNodeType(raw string) (NodeType, error) {
 
 type DAG struct {
 	DAGID             string         `json:"dag_id"`
+	TenantID          string         `json:"tenant_id"`
+	AgentID           string         `json:"agent_id"`
 	SessionID         string         `json:"session_id"`
 	UserID            string         `json:"user_id"`
 	OriginalIntent    string         `json:"original_intent"`
@@ -61,8 +67,11 @@ type DAG struct {
 type Task struct {
 	TaskID                    string         `json:"task_id"`
 	DAGID                     string         `json:"dag_id"`
+	Sequence                  int64          `json:"sequence"`
 	NodeType                  NodeType       `json:"node_type"`
-	SkillName                 string         `json:"skill_name"`
+	SkillName                 string         `json:"skill_name,omitempty"`
+	Goal                      string         `json:"goal,omitempty"`
+	MemHint                   map[string]any `json:"mem_hint"`
 	Status                    TaskStatus     `json:"status"`
 	PendingDependenciesCount  int            `json:"pending_dependencies_count"`
 	OwnerID                   string         `json:"owner_id,omitempty"`
@@ -78,6 +87,8 @@ type Task struct {
 type Session struct {
 	SessionID string    `json:"session_id"`
 	DAGID     string    `json:"dag_id"`
+	TenantID  string    `json:"tenant_id"`
+	AgentID   string    `json:"agent_id"`
 	UserID    string    `json:"user_id"`
 	Intent    string    `json:"intent"`
 	CreatedAt time.Time `json:"created_at"`

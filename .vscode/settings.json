@@ -4,7 +4,7 @@
   "rust-analyzer.checkOnSave": true,
   "rust-analyzer.check.command": "clippy",
   "rust-analyzer.linkedProjects": [
-    "apps/polaris/Cargo.toml"
+    "apps/mem3/Cargo.toml"
   ],
   "editor.formatOnSave": true,
   "editor.codeActionsOnSave": {

@@ -21,9 +21,9 @@
       "problemMatcher": []
     },
     {
-      "label": "make run-polaris",
+      "label": "make run-mem3",
       "type": "shell",
-      "command": "make run-polaris",
+      "command": "make run-mem3",
       "problemMatcher": []
     }
   ]

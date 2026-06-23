@@ -1,5 +1,7 @@
 # Phase 4 Progress
 
+- Refactor alignment note: `doc/refactor/2026-06-23-mem3-intent-router-alignment.md`.
+
 ## Started At
 - `2026-05-08T10:20:00+08:00`
 
