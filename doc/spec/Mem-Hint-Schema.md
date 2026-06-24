@@ -32,9 +32,9 @@ Design principles:
   - depends on `strategy` (`KV_POINT_GET` requires `target_task_id`, graph paths require `text` or `keywords`).
 
 ### Security scope
-- `mem_hint` 不携带 Tenant/Agent/Session/DAG 安全边界。
-- 安全作用域由 Arqo 从可信 Task 元数据写入 `Mem3SearchRequest.scope`，不能接受 LLM 覆盖。
-- 时间范围属于检索语义，因此保留在 `query.time_range` 中。
+- `mem_hint` does not carry Tenant/Agent/Session/DAG security boundaries.
+- Security scope is written by Arqo into `Mem3SearchRequest.scope` from trusted Task metadata, and LLM overrides must not be accepted.
+- Time range is retrieval semantics, so it remains in `query.time_range`.
 
 ### `planner_intent`
 - **Intent**: Encode planner-side optimization preference (latency, cost, freshness), not just retrieval target.
@@ -393,8 +393,8 @@ return working_memory + empty_retrieval
     "target_system": "PLATO_GRAPH",
     "strategy": "GRAPH_LOCAL_TRAVERSAL",
     "query": {
-      "keywords": ["支付模块", "鉴权拦截"],
-      "text": "定位支付失败与鉴权链路关系"
+      "keywords": ["payment module", "auth interception"],
+      "text": "Trace the relationship between payment failures and the authentication path"
     }
   }
 }
@@ -408,7 +408,7 @@ return working_memory + empty_retrieval
     "target_system": "PLATO_GRAPH",
     "strategy": "GRAPH_GLOBAL_SUMMARY",
     "query": {
-      "text": "过去一周支付系统稳定性演进与主要风险"
+      "text": "Payment-system stability evolution and main risks over the past week"
     },
     "planner_intent": {
       "cost_tier": "HIGH",

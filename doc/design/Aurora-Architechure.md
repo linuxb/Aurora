@@ -1,159 +1,158 @@
-# **Aurora 大规模 Agentic 服务系统 \- 详细架构设计与解决方案**
+# **Aurora Large-Scale Agentic Service System: Detailed Architecture and Solution**
 
-本白皮书旨在提供 Aurora 系统的深度架构设计蓝图。从用户请求接入，到亿级任务的高并发调度，再到多模态/多维度的长短期记忆管理，本设计致力于构建一个高可用、低延迟、具备自我修复能力的工业级智能体（Agent）服务基础设施。
+This whitepaper provides the architecture blueprint for Aurora. It covers user request intake, high-concurrency DAG scheduling, multimodal and multi-dimensional memory management, and self-healing behavior for an industrial-grade Agent service infrastructure.
 
-## **1\. 系统全局拓扑与核心组件**
+## **1. Global Topology and Core Components**
 
-Aurora 采用多语言微服务架构，以实现“控制流”、“数据流”和“计算流”的彻底解耦。
+Aurora uses a multi-language microservice architecture to fully decouple control flow, data flow, and compute flow.
 
-### **1.1 组件选型与职责划分**
+### **1.1 Component Choices and Responsibilities**
 
-* **API 网关与调度中心 (Gateway & Scheduler)**
-  * **语言**: Go (Golang)
-  * **核心职责**: 承接 HTTP/SSE 用户请求，意图识别（通过云端 LLM）并生成执行图（DAG），利用分布式数据库管理 DAG 状态机，监听并推送实时执行轨迹至前端。
-* **动作执行沙盒 (Skill Workers)**
-  * **语言**: TypeScript (Node.js) / Serverless 环境
-  * **核心职责**: 执行具体业务逻辑（如调用 API、执行代码、爬虫），将复杂结果浓缩并在源头进行异常分类（Semantic Error），向网关汇报细粒度执行进度。
-* **记忆与知识图谱引擎 (Memory Engine)**
-  * **语言**: Rust
-  * **核心职责**: 异步消费执行结果，与图数据库、KV 存储交互。负责知识榨取（调用 LLM 提取三元组），实现 GraphRAG 双轨检索。
-* **基础设施层 (Infrastructure)**
-  * **分布式调度状态库**: TiDB (本地开发使用 MySQL 8.0)，利用其分布式事务和锁机制。
-  * **中间结果存储**: Rocksdb，低成本存储海量大体积上下文 (JSON/文本)。
-  * **事件总线**: Redis，用于发布/订阅 (Pub/Sub) 模式的实时状态推送。  （待定）
-  * **图数据库**: NebulaGraph (生产) / Memgraph (本地)，用于存储实体关系与时序知识图谱。
+- **API Gateway and Scheduler**
+  - **Language**: Go.
+  - **Responsibilities**: receive HTTP/SSE user requests, run intent recognition and DAG generation, manage the DAG state machine through a distributed database, and stream real-time execution traces to the frontend.
+- **Skill Workers**
+  - **Language**: TypeScript in Node.js or a serverless runtime.
+  - **Responsibilities**: execute business logic such as API calls, code execution, and crawling; condense complex results; classify errors at the source as semantic errors; report fine-grained progress to the gateway.
+- **Memory and Knowledge Graph Engine**
+  - **Language**: Rust.
+  - **Responsibilities**: asynchronously consume execution results, interact with Graph and KV stores, extract knowledge with LLM-assisted triples, and provide dual-track GraphRAG retrieval.
+- **Infrastructure Layer**
+  - **Distributed scheduling state store**: TiDB in production and MySQL 8.0 for local development.
+  - **Intermediate result store**: RocksDB/KvRocks for large JSON/text context.
+  - **Event bus**: Redis Pub/Sub for real-time status push.
+  - **Graph database**: NebulaGraph in production and Memgraph locally for entity relations and temporal knowledge graphs.
 
-## **2\. 调度引擎设计：亿级并发流转**
+## **2. Scheduling Engine: Billion-Scale Concurrent Flow**
 
-### **2.1 面临的问题**
+### **2.1 Problems**
 
-* **轮询风暴 (Polling Storm)**：Worker 频繁轮询数据库扫描“已就绪”任务，会导致 CPU 和 IO 瞬间打满，引发数据库熔断。
-* **并发踩踏 (Thundering Herd)**：多个 Worker 同时扫描到相同的 READY 任务并尝试使用 CAS 抢占时，会产生海量的写冲突和重试，导致吞吐量断崖式下跌。
-* **状态依赖死锁**：上游任务完成后，如果因为幻读或竞态条件没有唤醒下游任务，下游将永远卡在 PENDING 状态（丢失唤醒）。
-* **意图路由准确性：**LLM输出不稳定，如果任由LLM生成DAG，很可能导致DAG不可用，如何权衡意图识别的准确度和成本（调用LLM还是Bert等轻量级模型）是一个重要挑战。
+- **Polling storm**: frequent Worker scans for READY tasks can saturate database CPU and IO.
+- **Thundering herd**: many Workers may discover the same READY task and create write conflicts when trying to claim it.
+- **Dependency deadlock**: if an upstream task completes but fails to wake downstream tasks because of phantoms or races, downstream tasks remain stuck in PENDING.
+- **Intent-routing accuracy**: LLM output is unstable. Letting an LLM generate a DAG without guardrails can make the DAG unusable, so the system must balance intent quality and cost.
 
-### **2.2 解决方案与核心机制**
+### **2.2 Solutions and Core Mechanisms**
 
-#### **2.2.1 状态物理分离 (PENDING vs READY)**
+#### **2.2.1 Physical State Separation (PENDING vs READY)**
 
-调度器将任务状态严格分为 PENDING（阻塞中，等待前置依赖完成）和 READY（就绪，可立即执行）。Worker 绝不扫描 PENDING，只紧盯 READY 队列，极大地降低了查询复杂度。
+The scheduler strictly separates PENDING tasks, which are blocked on dependencies, from READY tasks, which can execute immediately. Workers never scan PENDING tasks and only watch the READY queue, reducing query complexity.
 
-#### **2.2.2 基于原子减法的 Push 唤醒机制 (Atomic Counter)**
+#### **2.2.2 Push Wake-Up with Atomic Counters**
 
-* **原理**: 抛弃“下游轮询上游状态”的做法。采用“上游执行完，主动递减下游依赖计数器”的 Push 模式。
-* **实现**: 每个节点初始化时设置一个 pending\_dependencies\_count（前置依赖数量）。当节点 A 执行成功后，直接向数据库发送原子 SQL 递减下游节点 B 的计数器。
-* **示例**:
-  \-- 节点A完成后，原子更新下游节点B
-  UPDATE tasks
-  SET pending\_dependencies\_count \= pending\_dependencies\_count \- 1
-  WHERE task\_id \= 'node\_B'
-  RETURNING pending\_dependencies\_count;
-  \-- 如果 Go 收到返回值 0，立即触发 SQL 将 node\_B 状态置为 READY
+- **Principle**: instead of downstream nodes polling upstream state, upstream completion actively decrements downstream dependency counters.
+- **Implementation**: each node initializes `pending_dependencies_count` to the number of prerequisites. When node A succeeds, it sends an atomic SQL decrement to downstream node B.
+- **Example**:
 
-#### **2.2.3 优雅的并发分发 (SKIP LOCKED)**
+```sql
+-- After node A completes, atomically update downstream node B.
+UPDATE tasks
+SET pending_dependencies_count = pending_dependencies_count - 1
+WHERE task_id = 'node_B'
+RETURNING pending_dependencies_count;
 
-* **原理**: 利用关系型数据库的底层锁管理器，完美解决抢占冲突。
-* **实现**: Worker 通过 SELECT ... FOR UPDATE SKIP LOCKED 获取任务。当行被锁定，其他 Worker 会自动“跳过”该行，立刻锁定下一行，实现真正的零锁等待 ![][image1] 分发。
-* **针对 TiDB 的优化**: 由于 TiDB 分布式锁的网络开销较大，采用**批量抢占 (Batch Fetch)** 策略（例如 LIMIT 10 FOR UPDATE SKIP LOCKED）来摊销 RPC 延迟。同时，强制使用 AUTO\_RANDOM 主键打散写入热点。
+-- If Go receives 0, immediately set node_B to READY.
+```
 
-#### **2.2.4 租约机制与僵尸回收 (Visibility Timeout)**
+#### **2.2.3 Graceful Concurrent Dispatch (SKIP LOCKED)**
 
-* **问题**: Worker 在执行时由于 OOM 被杀或网络断开，导致任务永远处于 RUNNING 状态（僵死）。
-* **方案**: Worker 抢占任务时，一并写入 owner\_id 和 expire\_at（例如当前时间 \+ 60秒）。后台单例 Reaper 进程定期扫描 expire\_at \< NOW() 且处于 RUNNING 的任务，将其重置为 FAILED 或触发重规划。
+- **Principle**: use the relational database lock manager to resolve claim conflicts.
+- **Implementation**: Workers use `SELECT ... FOR UPDATE SKIP LOCKED`. When a row is locked, other Workers skip it and lock another row.
+- **TiDB optimization**: because distributed locks have network cost, use batch fetch, such as `LIMIT 10 FOR UPDATE SKIP LOCKED`, and use `AUTO_RANDOM` keys to spread write hotspots.
 
-## **3\. 容错与自愈：自动重路由 (Replanning)**
+#### **2.2.4 Lease and Zombie Recovery (Visibility Timeout)**
 
-### **3.1 面临的问题**
+- **Problem**: if a Worker is killed by OOM or loses network while executing, the Task may remain RUNNING forever.
+- **Solution**: when a Worker claims a task, it writes `owner_id` and `expire_at`, for example now plus 60 seconds. A singleton Reaper periodically scans expired RUNNING tasks and resets them to FAILED or triggers replanning.
 
-外部环境不可控（如目标 API 宕机、网页结构变化），若单点失败导致整个 DAG 崩溃，Agent 的可用性将极低。
+## **3. Fault Tolerance and Self-Healing: Replanning**
 
-### **3.2 解决方案：引入 REPLANNING 状态机与局部热修复**
+### **3.1 Problem**
 
-#### **3.2.1 案发现场快照 (Crime Scene Snapshot)**
+External environments are unreliable. Target APIs may fail and web pages may change. If one node failure collapses the whole DAG, Agent availability is poor.
 
-当某核心节点失败时，Go 网关不立即报错，而是将 DAG 宏观状态置为 REPLANNING。随后提取以下关键信息打包为 Prompt 语境：
+### **3.2 Solution: REPLANNING State Machine and Local Hot Repair**
 
-1. **原始意图 (Original Intent)**: 存储于 dags 元数据表中（例如：“帮我总结昨天日志并报警”），作为重规划的北极星指标。
-2. **可用资产 (Successful Nodes)**: 已完成任务的输出。
-3. **失败根因 (Error Distillation)**: 经过提炼的语义化错误原因（见 4.2 节）。
+#### **3.2.1 Crime Scene Snapshot**
 
-#### **3.2.2 受限解码与边界对齐 (Structured Outputs & Boundary Matching)**
+When a core node fails, the Go gateway does not immediately fail the whole request. It marks the DAG as REPLANNING and packages the following context for the prompt:
 
-为了防止大模型重规划产生“幻觉”或生成无法衔接的孤岛节点，在调用云端 LLM (Replanner) 时：
+1. **Original Intent**: stored in the `dags` metadata table and used as the north star for replanning.
+2. **Successful Nodes**: outputs from already completed Tasks.
+3. **Root Cause**: distilled semantic error information.
 
-* **明确断口**: 在 Prompt 中明确指出新节点必须对接的上游输入类型和下游期望输出类型。
-* **强制格式化**: 利用 response\_format: { type: "json\_schema" } 强制模型输出标准的 PatchDAG JSON 结构，包含 reasoning, new\_nodes, 和 downstream\_wiring。
+#### **3.2.2 Structured Outputs and Boundary Matching**
 
-#### **3.2.3 事务级图修复与静态检查**
+To prevent hallucinated or disconnected repair graphs, the Replanner prompt must:
 
-* **静态校验**: Go 网关拿到 PatchDAG 后，在内存中与原图拼接，进行循环依赖和类型兼容性检查。
-* **原子热修复**: 校验通过后，使用数据库事务将废弃节点置为 ABORTED，插入新节点，并将 DAG 状态恢复为 RUNNING。底层 Worker 会无缝接管新任务。
+- **Declare boundaries**: specify required upstream input types and downstream output expectations.
+- **Force structure**: use `response_format: { type: "json_schema" }` to output PatchDAG JSON containing `reasoning`, `new_nodes`, and `downstream_wiring`.
 
-## **4\. TS Worker 约束规范：噪音过滤与异常隔离**
+#### **3.2.3 Transactional Graph Repair and Static Checks**
 
-### **4.1 面临的问题**
+- **Static validation**: after Go receives PatchDAG, it merges it with the original graph in memory and checks cycles and type compatibility.
+- **Atomic hot repair**: after validation succeeds, a database transaction marks obsolete nodes ABORTED, inserts new nodes, and restores the DAG to RUNNING. Workers then pick up the new tasks normally.
 
-* **内存灾难**: 将未经处理的 MB 级别原生数据直接发给图谱引擎或放入 Prompt，会导致 Token 暴涨并拖慢系统。
-* **报错迷宫**: 将万行堆栈日志交给 LLM 会导致其注意力分散，无法准确进行 Replanning。
-* **单点崩溃**: 多个任务在同进程执行，一人 OOM 全家陪葬。
+## **4. TS Worker Constraints: Noise Filtering and Fault Isolation**
 
-### **4.2 解决方案：源头清洗与物理隔离**
+### **4.1 Problems**
 
-#### **4.2.1 双轨制返回接口 (Dual-Track Return Protocol)**
+- **Memory disaster**: passing raw MB-scale data directly to the graph engine or prompts inflates tokens and slows the system.
+- **Error maze**: giving an LLM huge stack traces hurts replanning accuracy.
+- **Single-process crash**: if many tasks run in one process, one OOM can kill all of them.
 
-强制 TS Skill 开发者返回两种数据结构，实现“计算流”与“状态流”的分离：
+### **4.2 Solution: Source Cleaning and Physical Isolation**
 
-* raw\_data: 原始负载（JSON/文本），由 Go 引擎通过 Mem3 Task Ingest 统一保存。
-* summary: Skill 可选提供的局部提示，仅作为 Mem3 reduce 的辅助输入，不直接充当跨 Task 摘要。
-  // TS Skill 返回规范
-  return {
-    raw\_data: "\<html\>...2MB...\</html\>",
-    summary: "爬取成功，获取 2MB 数据，包含 50 条有效评论。"
-  }
+#### **4.2.1 Dual-Track Return Protocol**
 
-#### **4.2.2 语义化异常漏斗 (Semantic Error Funnel)**
+TS Skills must return two data tracks to separate compute flow from state flow:
 
-TS SDK 提供统一错误类，要求开发者在源头对异常进行分类（如 NETWORK\_TIMEOUT, RATE\_LIMIT）。
+- `raw_data`: raw payload, JSON or text, saved by Arqo through Mem3 Task Ingest.
+- `summary`: optional local hint from the Skill. It can help Mem3 reduce but does not become the cross-Task rolling summary.
 
-Go 引擎在组装案发现场时，丢弃底层 raw\_stack，只把 human\_readable\_msg 发给 Replanner LLM，确保 LLM 只阅读高质量的诊断报告。
+```ts
+export interface SkillResult {
+  raw_data: unknown;
+  summary?: string;
+}
 
-#### **4.2.3 严格物理隔离**
+const result: SkillResult = {
+  raw_data: { comments: [] },
+  summary: "Crawl succeeded, collected 2 MB of data and 50 valid comments."
+};
+```
 
-* 采用 Docker 容器级隔离（后期演进为 MicroVM）。
-* **暖池架构 (Warm Pool)**：预先拉起空闲 Node.js 容器。调度时注入代码，执行完毕**立即销毁 (Disposable)**，从根本上杜绝内存泄漏和状态污染。
+#### **4.2.2 Semantic Error Funnel**
 
-## **5\. 记忆引擎设计：双轨长短记忆与 GraphRAG**
+The TS SDK provides a unified error class. Developers classify errors at the source, such as `NETWORK_TIMEOUT` or `RATE_LIMIT`. When building the crime-scene snapshot, Go drops low-level `raw_stack` and sends only `human_readable_msg` to the Replanner LLM.
 
-### **5.1 面临的问题**
+#### **4.2.3 Strict Physical Isolation**
 
-* **短期记忆黑洞**: 复杂任务经过 20 步流转，上下文线性增长，导致 OOM 或超出 Token 限制。
-* **长期记忆断层**: Agent 无法记住跨会话的历史经验，仅依靠文本向量检索（Vector RAG）经常出现找错上下文的“召回幻觉”。
+- Use Docker container isolation initially, with a future path to MicroVMs.
+- **Warm Pool**: pre-start idle Node.js containers. Inject code at scheduling time and destroy the container immediately after execution to avoid state pollution and memory leaks.
 
-### **5.2 解决方案：Token 阈值折叠与时序知识图谱**
+## **5. Memory Engine: Dual-Track Short/Long Memory and GraphRAG**
 
-参考 `Mem3.md` 方案设计。
+### **5.1 Problems**
 
-固定生命周期如下：
+- **Short-term memory black hole**: complex tasks can span 20 steps and grow context linearly until OOM or token limits.
+- **Long-term memory gap**: Agents cannot remember cross-session history. Plain vector RAG often retrieves the wrong context.
 
-1. 每次 DAG 构建时，将 Query 的 intent slot 通过 `DAG_CONTEXT` Ingest 写入 Mem3。
-2. 每个 Task 开始前调用 Search，读取 last-N outputs、最新 rolling summary 以及 `mem_hint` 定向记忆。
-3. 每个 Task 完成后调用 `TASK_OUTPUT` Ingest；Mem3 异步执行 `summary = lightweight_llm(output, last_summary)`。
+### **5.2 Solution: Rolling Summaries and Temporal Knowledge Graphs**
 
-#### **5.2.3 时序多租户知识图谱 (Temporal Multi-Tenant GraphRAG)**
+See `doc/design/Mem3.md` for the detailed design.
 
-* **严格租户隔离**: 采用逻辑隔离，图数据库中每一个节点（Node）强关联 `tenant_id`，并记录 `agent_id` 与可选 `user_id`。
-* **时序保留**: 使用 MERGE 语句更新实体，但所有关系边（Edge）必须带有时间戳属性（如 observed\_at），保留知识的演进时间线。
-* **防注入查询重写 (Zero-Trust Rewriting)**:
-  当 Mem3 将 Search 路由到 GraphRAG 时，不信任 LLM 生成的 Cypher 或安全作用域，而是根据 Arqo 注入的可信 scope 强制拼接 `tenant_id` 与必要的 `agent_id` 约束，确保物理级防穿透。
+The fixed lifecycle is:
 
-## **6\. 用户体验与前端交互：白盒化轨迹 (Glass-box UX)**
+1. During every DAG build, write the query intent slot through `DAG_CONTEXT` Ingest.
+2. Before every Task, call Search to read last-N outputs, the latest rolling summary, and directed memory selected by `mem_hint`.
+3. After every Task, write output through `TASK_OUTPUT` Ingest and asynchronously reduce `new_summary = LLM(output, last_summary)`.
+4. GraphRAG relations are extracted asynchronously and stored with tenant isolation.
 
-### **6.1 面临的问题**
+## **6. Local-First Evolution**
 
-长时 Agent 任务会让前端呈现“假死”状态，严重损害用户体验。且高频的数据库状态写入会导致底层数据库 IO 打满。
+Aurora also supports a local-first runtime through the Local Engine design. The cloud path keeps TiDB/KvRocks/GraphDB. The local path can use SQLite, local files or BadgerDB, and embedded graph storage. See `doc/design/Local-Engine.md`.
 
-### **6.2 解决方案：多级探针与实时流推送**
+## **7. Summary**
 
-* **数据平面隔离**: 执行探针日志（如“正在下载图片 50%”）**严禁写入 TiDB**。
-* **Pub/Sub 机制**: TS Worker SDK 提供轻量级打点 API（如 ctx.emitLog(...)）。日志直接序列化后 PUBLISH 到 Redis 指定 Session 的 Channel。
-* **SSE 桥接**: Go 网关监听 Redis Channel，将接收到的微观进度、节点流转事件、以及 LLM 的 Stream Token 透传至前端，形成类似打字机加动态时间轴的酷炫视觉效果。
+Aurora separates scheduling, execution, and memory so that each plane can scale and fail independently. The key design principles are deterministic DAG control, strict schema boundaries, asynchronous memory extraction, and transactional repair.

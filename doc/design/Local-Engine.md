@@ -1,103 +1,103 @@
-# **Aurora 本地化与沙盒适配架构设计白皮书**
+# **Aurora Local-First and Sandbox Adapter Architecture Whitepaper**
 
-随着 Local AI 生态的崛起与隐私计算需求的爆发，Aurora 系统不仅需要支撑云端亿级高并发，也需要能够平滑降维，作为 Local-First Agent 运行在用户的 Unix/macOS 本机环境中。
+As the Local AI ecosystem grows and privacy-computing demand rises, Aurora must support both cloud-scale high concurrency and a reduced local-first Agent mode running on a user's Unix/macOS machine.
 
-本文档详细说明了 Aurora 的跨环境基础设施适配层（Infra Adapter Layer）设计，以及基于 Zig 语言构建的本地 TypeScript 极速安全沙盒（Sandbox Service）架构。
+This document describes Aurora's cross-environment Infra Adapter Layer and the Zig-based local TypeScript high-speed secure sandbox service.
 
-## **1\. 基础设施适配器层设计 (Infra Adapter Layer)**
+## **1. Infra Adapter Layer Design**
 
-为了实现“一套业务代码，两栖平滑运行”，Aurora 在底层的 Arqo（调度大脑）和 Mem3（记忆引擎）中引入了标准的 Adapter 模式。通过依赖注入（Dependency Injection），在启动时根据环境标量（ENV=cloud 或 ENV=local）加载不同的存储驱动。
+To achieve "one business codebase, smooth dual-mode execution," Aurora introduces the Adapter pattern in Arqo, the scheduling brain, and Mem3, the memory engine. Through dependency injection, startup loads different storage drivers according to an environment scalar such as `ENV=cloud` or `ENV=local`.
 
-### **1.1 核心接口定义 (Core Interfaces)**
+### **1.1 Core Interfaces**
 
-在 Go 语言的调度网关中，剥离具体数据库实现，抽象出三大核心数据平面接口：
-```golang
-// 1\. 状态流转引擎接口 (State Engine)  
-type ITaskStateStore interface {  
-    FetchReadyTasks(batchSize int) (\[\]Task, error) // 对应 SKIP LOCKED 逻辑  
-    UpdateTaskStatus(taskID, status string) error  
-    AtomicDecrementDependency(taskID string) (int, error) // 对应依赖减法  
-    BeginTx() (Transaction, error) // JIT 扩图所需的事务  
+In the Go scheduling gateway, concrete database implementations are separated from three core data-plane interfaces:
+
+```go
+// 1. State Engine interface.
+type ITaskStateStore interface {
+    FetchReadyTasks(batchSize int) ([]Task, error) // Corresponds to SKIP LOCKED behavior.
+    AtomicDecrementDependency(taskID string) (int, error) // Corresponds to dependency decrement.
+    BeginTx() (Transaction, error) // Transaction required by JIT graph expansion.
 }
 
-// 2\. 短期上下文存储接口 (Context/Memory Store)  
-type IContextStore interface {  
-    PutContext(taskID string, data \[\]byte) error  
-    GetContext(taskID string) (\[\]byte, error)  
+// 2. Context/Memory Store interface.
+type IContextStore interface {
+    PutTaskRawData(taskID string, payload []byte) error
+    GetTaskRawData(taskID string) ([]byte, error)
 }
 
-// 3\. 图谱记忆引擎接口 (Graph Engine)  
-type IGraphStore interface {  
-    MergeTriplets(triplets \[\]Triplet) error  
-    SearchSubGraph(query string, userID string) (GraphData, error)  
+// 3. Graph Engine interface.
+type IGraphStore interface {
+    UpsertRelation(edge Relation) error
+    QuerySubgraph(query GraphQuery) ([]Relation, error)
 }
 ```
 
-### **1.2 云端与本地驱动映射矩阵**
+### **1.2 Cloud and Local Driver Mapping Matrix**
 
-| 接口职责                       | Cloud-Native 驱动 (云端高并发) | Local-First 驱动 (本机跨平台)               | 本地化设计考量与 OpenClaw 思想                                                                                                                                                                                                        |
-| :----------------------------- | :----------------------------- | :------------------------------------------ | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **状态控制** (ITaskStateStore) | **TiDB** (分布式 SQL)          | **SQLite** (嵌入式 SQL)                     | SQLite 天生支持跨平台，且支持单机极速的 ACID 事务。利用 SQLite 的 BEGIN EXCLUSIVE 或 WAL 模式，在本地完美模拟 Arqo 并发调度的状态流转，且无需用户安装任何数据库进程。                                                                 |
-| **生肉上下文** (IContextStore) | **Apache KvRocks**             | **Local File System (Markdown) / BadgerDB** | 参考 OpenClaw，本地模式下将任务 raw\_data 序列化为标准的 **Markdown 文件** (如 workspace/memory/task\_123.md) 存入本地文件系统。优势：**人类极度可读**，用户可以直接用文本编辑器查看 Agent 的原始抓取记录和思考过程，增强系统透明度。 |
-| **图谱记忆** (IGraphStore)     | **NebulaGraph / Neo4j**        | **KùzuDB / DuckDB**                         | 抛弃沉重的图数据库服务进程，引入 KùzuDB（专门为嵌入式图计算设计的 C++ 库，提供 Go 绑定）。它运行在单进程内，直接读写本地磁盘文件，提供极速的跨会话时序图游走查询。                                                                    |
+| Interface responsibility | Cloud-native driver | Local-first driver | Local design consideration |
+| --- | --- | --- | --- |
+| **State control** (`ITaskStateStore`) | **TiDB** distributed SQL | **SQLite** embedded SQL | SQLite is cross-platform and supports fast local ACID transactions. `BEGIN EXCLUSIVE` or WAL can approximate Arqo's local scheduling state flow without requiring users to install a database process. |
+| **Raw context** (`IContextStore`) | **Apache KvRocks** | **Local File System (Markdown) / BadgerDB** | In local mode, task `raw_data` can be serialized as Markdown files such as `workspace/memory/task_123.md`. This keeps Agent records readable in a text editor and improves transparency. |
+| **Graph memory** (`IGraphStore`) | **NebulaGraph / Neo4j** | **KuzuDB / DuckDB** | Avoid heavy graph database services. KuzuDB is an embedded graph library, while DuckDB can validate edge-table modeling in the first local phase. |
 
-### **1.3 跨平台兼容性保障 (Unix & macOS)**
+### **1.3 Cross-Platform Compatibility (Unix & macOS)**
 
-* **纯 Go 编译**: Arqo 调度器本身使用 Go 编写，通过交叉编译可直接生成 macOS (Apple Silicon / Intel) 和 Linux 系统的单一可执行文件（Static Binary）。  
-* **CGO 限制**: 为了保证用户分发的极简性，对于 SQLite 和 KùzuDB，优先采用 Pure Go 实现的版本（如 modernc.org/sqlite），彻底告别 CGO 带来的跨环境编译依赖噩梦。
+- **Pure Go compilation**: the Arqo scheduler is written in Go and can be cross-compiled into one static binary for macOS Apple Silicon, macOS Intel, and Linux.
+- **CGO constraints**: for SQLite and KuzuDB, prefer pure-Go implementations where possible, such as `modernc.org/sqlite`, to avoid cross-environment compilation complexity.
 
-## **2\. Zig 驱动的 TS 安全沙盒设计 (Aegis Sandbox)**
+## **2. Zig-Driven TS Secure Sandbox (Aegis Sandbox)**
 
-### **2.1 本地化 Skill 运行面临的致命挑战**
+### **2.1 Critical Challenges for Local Skill Execution**
 
-在云端，TS Skill 跑在一次性 Docker 容器中。但在本地环境：
+In the cloud, TS Skills run in disposable Docker containers. In local mode:
 
-1. **环境依赖深**: 不能假设用户的 macOS 上装了 Node.js 或 Bun。  
-2. **安全风险极高**: Agent 自动下载的恶意的 TS Skill 一旦在宿主机执行，可以直接执行 fs.rmdirSync('/') 摧毁系统。  
-3. **冷启动敏感**: 本地硬件资源有限，不能频繁启动重型虚拟机。
+1. **Deep environment dependencies**: we cannot assume users have Node.js or Bun installed.
+2. **High security risk**: malicious TS Skills downloaded by an Agent could damage the host if executed directly.
+3. **Cold-start sensitivity**: local machines cannot afford frequent startup of heavy virtual machines.
 
-### **2.2 解决方案：引入 Zig 构建 Aegis Embedded Engine**
+### **2.2 Solution: Aegis Embedded Engine Built with Zig**
 
-利用 Zig 极强的 C 互操作性、无隐藏控制流以及微秒级的极速启动特性，我们使用 Zig 编写一个名为 **Aegis** 的独立沙盒守护进程，内嵌 **QuickJS** 引擎。
+Using Zig's strong C interoperability, explicit control flow, and microsecond-level startup, Aurora builds **Aegis** as an independent sandbox daemon with an embedded **QuickJS** engine.
 
-#### **2.2.1 架构工作流**
+#### **2.2.1 Architecture Workflow**
 
-1. **下发**: Arqo (Go) 将预编译好的纯 JS/TS 代码字符串和执行参数，通过 Unix Domain Socket (UDS) 或标准输入 (STDIN) 发送给 Aegis (Zig) 进程。  
-2. **初始化**: Zig 在内存中瞬间O(1)级耗时，\< 1ms）拉起一个新的 QuickJS 运行时实例 (JSRuntime & JSContext)。  
-3. **特权注入**: Zig 按照 Arqo 声明的权限标量，向 JS 环境中按需注入原生绑定函数（Native Bindings）。  
-   * *例如：如果该 Skill 只被允许访问天气 API，Zig 只会向 JS 暴露一个受限的 fetch 函数，屏蔽掉一切涉及文件系统 fs 的 API。*  
-4. **执行与监控**: Zig 触发 JS 代码执行，并开启硬件级中断监控。  
-5. **返回**: 执行完毕后，返回符合双轨制规范的 raw\_data 和 summary。
+1. **Dispatch**: Arqo (Go) sends precompiled JS code and execution parameters to Aegis (Zig) through Unix Domain Socket or STDIN.
+2. **Initialize**: Zig creates a new QuickJS runtime and context in memory with near-constant time and sub-millisecond startup goals.
+3. **Inject privileges**: Zig injects native bindings according to Arqo-declared permissions.
+   - For example, if a Skill may only access a weather API, Zig exposes a restricted `fetch` and hides filesystem APIs.
+4. **Execute and monitor**: Zig runs the JS code and enables interrupt monitoring.
+5. **Return**: the result follows the dual-track contract: `raw_data` and `summary`.
 
-#### **2.2.2 Zig 引擎的核心安全与隔离机制**
+#### **2.2.2 Core Security and Isolation Mechanisms**
 
-* **内存硬约束 (Memory Quota Allocation)**  
-  QuickJS 支持自定义内存分配器。我们利用 Zig 优秀的自定义 Allocator（如 FixedBufferAllocator），强制给这个 JS 实例分配例如 128MB 的内存上限。  
-  如果 TS 代码写了死循环导致内存溢出，Zig 的 Allocator 会立刻拦截并抛出 OutOfMemory 错误，终止 JS 执行，**宿主机操作系统绝对安全**。  
-* **时钟与指令计数熔断 (Instruction Limit)**  
-  在 Zig 层设置 QuickJS 的 JS\_SetInterruptHandler。每当 JS 引擎执行了一定数量的字节码指令，Zig 函数就会被回调。如果发现超时（如执行超过 10 秒），Zig 直接返回 \-1 硬中断脚本执行，防止 CPU 算力被榨干。  
-* **零系统调用泄漏 (Zero Syscall Leak)**  
-  在 macOS (通过 sandbox-exec) 和 Linux (通过 seccomp-bpf) 下，Zig Launcher 自身启动时就锁死自己的系统调用权限。即使 QuickJS 引擎存在 C 语言级别的 0day 漏洞被击穿，黑客也无法逃逸出 Zig 预设的操作系统级监狱。
+- **Memory quota allocation**: QuickJS supports custom allocators. Zig can use an allocator such as `FixedBufferAllocator` and impose a hard memory limit, for example 128 MB, on each JS instance. If code allocates too much memory, the allocator stops execution with `OutOfMemory` while keeping the host safe.
+- **Time and instruction breaker**: Zig configures QuickJS `JS_SetInterruptHandler`. After a number of bytecode instructions, Zig checks elapsed time and returns `-1` to interrupt scripts exceeding the timeout, for example 10 seconds.
+- **Zero syscall leak**: on macOS through `sandbox-exec` when available and on Linux through `seccomp-bpf`, the Zig launcher can lock down OS-level syscall permissions before starting JS execution. Even if QuickJS has a native-level vulnerability, the process remains inside the OS-level cage.
 
-### **2.3 Arqo 与 Aegis 的通信契约 (Go \<-\> Zig)**
+### **2.3 Arqo and Aegis Communication Contract (Go <-> Zig)**
 
-为了保证高效和跨平台，Arqo 调度器与 Aegis 沙盒之间通过标准 I/O 及 JSON-RPC 进行通信。
+Arqo and Aegis communicate through standard I/O or JSON-RPC for portability and low overhead.
 
 ```json
-// Arqo (Go) 发送给 Aegis (Zig) 的执行指令  
-{  
-  "task\_id": "task\_local\_001",  
-  "skill\_name": "ReadLocalConfig",  
-  "source\_code": "export default async function run(ctx) { return { summary: 'Done', raw\_data: ctx.env.CONFIG }; }",  
-  "limits": {  
-    "memory\_mb": 64,  
-    "timeout\_ms": 5000  
-  },  
-  "permissions": {  
-    "network": false,  
-    "fs\_read\_paths": \["/Users/Aurora/workspace/config.json"\]  
-  }  
+{
+  "jsonrpc": "2.0",
+  "method": "executeSkill",
+  "params": {
+    "task_id": "task_123",
+    "source_code": "export default async function main(input) { return { raw_data: input, summary: 'ok' } }",
+    "input": {},
+    "permissions": {
+      "network": ["https://api.weather.example"],
+      "fs": []
+    },
+    "limits": {
+      "timeout_ms": 10000,
+      "memory_mb": 128
+    }
+  },
+  "id": "req_1"
 }
 ```
 
-通过这套适配架构，Aurora 不仅保持了 TS 开发者生态的繁荣，更在没有任何外部容器依赖的情况下，在本地电脑上构建起了一座坚不可摧的“单文件”堡垒引擎。
+With this adapter architecture, Aurora keeps the TypeScript developer ecosystem while building a strong local single-file fortress engine without external container dependencies.

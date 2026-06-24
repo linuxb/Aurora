@@ -1,39 +1,46 @@
-# Intent Router & JIT 扩图架构审计（2026-05-05）
+# Intent Router & JIT Graph Expansion Architecture Audit (2026-05-05)
 
-## 审计目标
-围绕最新架构目标审计并修正：
-- DAG Node 必须显式区分两类：
-  - `skill`（直接映射具体 Skill）
-  - `planner`（JIT 扩图 Step）
-- `SUCCESS_AND_EXPAND` 只能由 `planner` 节点触发。
+## Audit Goal
 
-## 审计结论
-在修正前，代码存在“类型语义隐式化”的偏差：系统主要通过 `skill_name=ReActPlanner` 约定来推断扩图节点，缺少一等类型约束。
+Audit and correct the latest architecture goals:
 
-本次已完成修正并通过测试，当前实现已与目标架构一致：
-1. Node/Step 显式类型化。
-2. 规划校验器强校验类型与技能映射关系。
-3. 调度执行面强约束扩图权限。
-4. MySQL/Memory 两个 backend 行为一致。
+- DAG Nodes must explicitly distinguish two categories:
+  - `skill`: directly maps to a concrete Skill.
+  - `planner`: a JIT graph-expansion Step.
+- `SUCCESS_AND_EXPAND` can only be triggered by `planner` nodes.
 
-## 已修正项
-- `planner.Node` 新增 `NodeType`；支持常量：`skill`、`planner`。
-- `planner.ValidateDAG` 新增规则：
-  - `node_type` 必填且必须为上述两类之一。
-  - `planner` 节点必须使用 `ReActPlanner`。
-  - `ReActPlanner` 不允许标注为 `skill`。
-- `SessionTaskSpec`、`model.Task` 新增 `NodeType`，实现类型语义端到端传递。
-- 扩图权限收敛：
-  - `CompleteTask` 收到 `ExpansionPayload` 时，若当前任务不是 `planner`，返回 `ErrExpansionNotAllowed`。
-- MySQL 持久化模型升级：
-  - `tasks` 表新增 `node_type`（并在 schema ensure 中兼容补列）。
-  - 所有任务查询/扫描/插入路径补齐 `node_type` 字段。
-- Mock Router 输出改为显式 `NodeType`。
+## Audit Conclusion
 
-## 风险与后续建议
-- 目前 `NodeType` 以字符串常量实现，可进一步抽象为共享枚举类型包，减少跨模块硬编码。
-- `ExpansionPayload.NewNodes` 当前默认落成 `skill`；若未来要支持“扩图产生新的 planner 节点”，需扩展 payload schema（加入 node_type）并更新校验。
+Before the fix, the code had implicit type semantics. The system mainly inferred expansion nodes through the convention `skill_name=ReActPlanner` and lacked first-class type constraints.
 
-## 验证
-- 执行：`cd apps/arqo && GOCACHE=/Users/linzhenbin/workspace/my_proj/aurora/.cache/go-build go test ./...`
-- 结果：`internal/api`、`internal/planner`、`internal/scheduler` 全部通过。
+The fix has been completed and tests passed. The implementation now matches the target architecture:
+
+1. Node/Step types are explicit.
+2. The planner validator strongly checks type and Skill mapping relations.
+3. The scheduling execution plane strictly controls graph-expansion permissions.
+4. MySQL and Memory backends behave consistently.
+
+## Fixed Items
+
+- Added `NodeType` to `planner.Node`; supported constants are `skill` and `planner`.
+- Added rules to `planner.ValidateDAG`:
+  - `node_type` is required and must be one of the two allowed values.
+  - `planner` nodes must use `ReActPlanner`.
+  - `ReActPlanner` must not be labeled as `skill`.
+- Added `NodeType` to `SessionTaskSpec` and `model.Task`, enabling end-to-end type propagation.
+- Narrowed expansion permission:
+  - When `CompleteTask` receives an `ExpansionPayload`, it returns `ErrExpansionNotAllowed` if the current Task is not a `planner`.
+- Upgraded MySQL persistence model:
+  - Added `node_type` to the `tasks` table and made schema ensure compatible with column addition.
+  - Filled `node_type` in all task query, scan, and insert paths.
+- Mock Router output now uses explicit `NodeType`.
+
+## Risks and Follow-Up Suggestions
+
+- `NodeType` is currently implemented as string constants. It could be further abstracted into a shared enum package to reduce cross-module hardcoding.
+- `ExpansionPayload.NewNodes` currently defaults to `skill`. If future expansion needs to create new `planner` nodes, extend the payload schema with `node_type` and update validation.
+
+## Verification
+
+- Command: `cd apps/arqo && GOCACHE=/Users/linzhenbin/workspace/my_proj/aurora/.cache/go-build go test ./...`
+- Result: `internal/api`, `internal/planner`, and `internal/scheduler` all passed.

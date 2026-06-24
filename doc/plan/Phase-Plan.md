@@ -1,199 +1,234 @@
-# Aurora 分阶段研发计划（可运行、可测试）
+# Aurora Phased R&D Plan (Runnable and Testable)
 
-## 目标说明
-该计划基于现有设计文档，采用“每阶段都可演示 + 可测试 + 可回归”的推进方式。每个阶段都必须输出一个可被验证的里程碑。
+## Goal Statement
 
-## 决策追溯规则
-- 所有待决策点与已决策结果统一记录到 `doc/progress/Decision-Log.md`。
-- 每条记录必须包含：`recorded_at`（RFC3339 含时区）、`phase`、`topic`、`status`、`decision`、`owner`。
-- 当决策被修改时，不覆盖原记录；新增一条 `status=superseded` 或新版本记录，并指向被替代项。
-- 每个 phase 结束时，补一条“phase closure”记录，包含未决项和风险说明，方便复盘。
+This plan is based on the existing design documents and follows a "demoable + testable + regression-friendly at every phase" delivery rhythm. Each phase must produce a verifiable milestone.
 
-## Deferred Hardening 固定节奏
-- Deferred hardening 项不阻塞主线 phase 研发推进，但必须固定回归。
-- 固定回归规则见：`doc/progress/Hardening-Cadence.md`。
-- 每次 phase closure 需要明确记录：哪些 hardening 已完成，哪些延期，延期风险是否可接受。
+## Decision Traceability Rules
 
-## Phase 文档分工
-- `doc/progress/Phase-Plan.md`: 仅维护全局阶段目标、验收标准与整体节奏。
-- `doc/progress/Phase-0-Progress.md`, `doc/progress/Phase-1-Progress.md`, ...: 维护阶段执行进度、阶段内待决策点、讨论结论。
-- `doc/progress/Decision-Log.md`: 维护跨阶段的统一决策追溯索引。
+- All open decisions and resolved decisions are recorded in `doc/progress/Decision-Log.md`.
+- Each record must include `recorded_at` in RFC3339 with timezone, `phase`, `topic`, `status`, `decision`, and `owner`.
+- When a decision changes, do not overwrite the original record. Add a `status=superseded` record or a new version that points to the replaced item.
+- At the end of each phase, add a phase-closure record with unresolved items and risk notes.
 
-## Phase 0: MVP 框架落地（已完成）
+## Deferred Hardening Cadence
 
-### 研发目标
-- 搭建可运行的三语言最小框架：
-  - `arqo`（Go）: 网关与 DAG 状态机核心
-  - `worker-ts`（TS）: Skill 执行与语义化错误
-  - `mem3`（Rust）: 记忆控制器最小服务
-- 落地最小协议：
-  - Task 状态流转：`PENDING -> READY -> RUNNING -> SUCCESS/FAILED`
-  - Skill 双轨返回：`raw_data` + `summary`
-  - 失败触发 DAG `REPLANNING`
-- 提供本地开发与调试配置（VSCode / Makefile / Docker Compose）
+- Deferred hardening items do not block the main phase track, but they must be revisited at a fixed cadence.
+- The cadence rules are in `doc/progress/Hardening-Cadence.md`.
+- Every phase closure must record which hardening items are complete, which are deferred, and whether the deferral risk is acceptable.
 
-### 可用功能
-- 通过 `POST /v1/sessions` 创建 session 并自动生成 demo DAG
-- `worker-ts` 自动 pull/execute/complete Task
-- `mem3` 提供 `healthz` 与 `ingest/memory` 最小接口
+## Phase Document Ownership
 
-### 可测试性
-- `go test ./...`：校验核心 DAG 流转与失败重规划状态变迁
-- `cargo test`：校验 mem3 ingest 解析
-- 手工联调：curl 建 session，观察任务从 READY 到 SUCCESS
+- `doc/plan/Phase-Plan.md`: global phase goals, acceptance criteria, and cadence.
+- `doc/progress/Phase-0-Progress.md`, `doc/progress/Phase-1-Progress.md`, and so on: phase execution progress, phase-local decision points, and discussion conclusions.
+- `doc/progress/Decision-Log.md`: cross-phase decision traceability index.
 
-### 验收标准
-- 本地 M2 环境可在 10 分钟内跑起 demo
-- DAG 能完成完整 happy-path
-- 失败任务能把 DAG 置为 `REPLANNING`
+## Phase 0: MVP Framework Landing (Completed)
 
-## Phase 1: 核心调度落库 + 基础事件流（进行中）
+### R&D Goals
 
-### 研发目标
-- 把 `arqo` 的 in-memory store 替换为 MySQL/TiDB 存储
-- 引入 `SKIP LOCKED` 抢占和原子依赖计数更新
-- 引入 Redis Pub/Sub，打通执行日志实时事件流
+- Build a runnable three-language minimal framework:
+  - `arqo` in Go: gateway and DAG state-machine core.
+  - `worker-ts` in TypeScript: Skill execution and semantic errors.
+  - `mem3` in Rust: minimal memory controller service.
+- Implement minimal protocols:
+  - Task state flow: `PENDING -> READY -> RUNNING -> SUCCESS/FAILED`.
+  - Skill dual-track return: `raw_data` + `summary`.
+  - Task failure triggers DAG `REPLANNING`.
+- Provide local development and debugging configuration for VSCode, Makefile, and Docker Compose.
 
-### 可用功能
-- 多 worker 并发抢占无重复执行
-- 下游节点依赖归零后自动 READY
-- 前端或 CLI 可订阅任务执行事件
+### Available Capabilities
 
-### 可测试性
-- 并发测试：N workers 并发下无重复领取同一 task
-- 数据一致性测试：依赖计数无负数，无丢唤醒
-- 回归脚本：100 次 DAG 批量执行通过率
+- Create a session through `POST /v1/sessions` and automatically generate a demo DAG.
+- `worker-ts` can pull, execute, and complete Tasks automatically.
+- `mem3` provides minimal `healthz` and `ingest/memory` endpoints.
 
-### 验收标准
-- 关键接口 P95 延迟与吞吐达到预期（需定义目标值）
-- 并发场景下无死锁/重复消费
+### Testability
 
-## Phase 2: Intent Router + DAG Validator
+- `go test ./...` validates core DAG flow and failure-to-replanning state transitions.
+- `cargo test` validates Mem3 ingest parsing.
+- Manual integration: create a session with curl and observe Tasks from READY to SUCCESS.
 
-### 研发目标
-- 实现“意图插槽提取 -> DAG 受限生成 -> 静态校验”流水线
-- 实现 DAG 编译器校验：
-  - cycle detection
-  - dangling dependency
-  - isolated node warning
+### Acceptance Criteria
 
-### 可用功能
-- 任意用户自然语言请求可生成合法 DAG 或明确失败原因
-- 校验失败可触发自动修正重试（有限次数）
+- A local M2 machine can run the demo within 10 minutes.
+- The DAG completes the happy path.
+- A failed Task can set the DAG to `REPLANNING`.
 
-### 可测试性
-- 模型输出 mock 测试：覆盖合法图/非法图
-- 属性测试：随机图校验器健壮性
-- E2E：意图输入到 DAG 入库全链路
+## Phase 1: Persistent Core Scheduler + Basic Event Stream (In Progress)
 
-### 验收标准
-- DAG 校验错误可解释且可重试修复
-- 全链路失败可观测可追踪
+### R&D Goals
 
-## Phase 3: Replanning 与故障自愈
+- Replace Arqo's in-memory store with MySQL/TiDB.
+- Introduce `SKIP LOCKED` claiming and atomic dependency-counter updates.
+- Introduce Redis Pub/Sub for live execution-log events.
 
-### 研发目标
-- 实现 Sweeper/Reaper 租约过期回收
-- 接入结构化 PatchDAG 重规划
-- 支持事务级局部热修复
+### Available Capabilities
 
-### 可用功能
-- Worker 崩溃后可自动识别僵尸任务
-- 失败 DAG 可插入新节点并继续执行
+- Multiple Workers can claim Tasks concurrently without duplicate execution.
+- Downstream nodes automatically become READY when dependencies reach zero.
+- Frontend or CLI can subscribe to Task execution events.
 
-### 可测试性
-- 故障注入：kill worker / timeout / network fail
-- 事务回滚测试：PatchDAG 校验失败不污染原图
+### Testability
 
-### 验收标准
-- 自愈路径可稳定恢复核心业务流程
-- 重规划次数和成功率有观测指标
+- Concurrency test: no duplicate claim of the same Task under N concurrent Workers.
+- Data-consistency test: dependency counters never go negative and wake-ups are not lost.
+- Regression script: 100 batch DAG executions pass.
 
-## Phase 4: Memory 与 GraphRAG
+### Acceptance Criteria
 
-### 研发目标
-- `mem3` 从最小服务升级为异步 memory pipeline
-- 接入 KV（raw_data）和 GraphDB（summary/实体关系）
-- 提供内部 `SearchMemoryGraph` 安全查询接口
+- Key API P95 latency and throughput meet target values to be defined.
+- No deadlocks or duplicate consumption under concurrency.
 
-### 可用功能
-- 长短记忆分离
-- 跨任务检索记忆能力上线
-- 图查询强制 user_id 隔离
+## Phase 2: Intent Router and Structured DAG Generation
 
-### 可测试性
-- 多租户隔离测试（防串读）
-- memory 抽取质量测试（抽样人工评估 + 自动评估）
+### R&D Goals
 
-### 验收标准
-- 跨 session 记忆召回可用
-- 无跨租户数据泄漏
+- Implement the pipeline: intent slot extraction -> restricted DAG generation -> static validation.
+- Implement DAG compiler validation:
+  - cycle detection;
+  - dangling dependency detection;
+  - node type and Skill mapping checks.
 
-## Phase 4.5: Local-Engine 最小原型（在 Mem3 完成后立即启动）
+### Available Capabilities
 
-### 研发目标
-- 在保持 cloud 主干推进的前提下，提前启动本地化最小原型（Local-First）。
-- 基于现有 `arqo + mem3` 能力，验证本地单机可运行闭环。
-- 固化本地化关键接口与执行协议，降低后续 Phase 6 风险。
+- Arbitrary natural-language requests can generate a valid DAG or a clear failure reason.
+- Validation failures can trigger bounded automatic repair retries.
 
-### 可用功能
-- `ARQO_RUNTIME_MODE=local` 的最小运行模式。
-- 本地单机 session 执行闭环（创建、调度、执行、结果回读）。
-- Local 沙盒执行面 MVP 协议打通（先最小可用，不追求最终安全形态）。
+### Testability
 
-### 可测试性
-- 本机 E2E：创建 session -> DAG 执行 -> 结果可查询。
-- 资源限制测试：超时/内存上限策略生效。
-- 回归验证：不影响 cloud 模式原有路径。
+- Mock model-output tests cover valid and invalid graphs.
+- Property tests validate graph-checker robustness on random graphs.
+- E2E covers intent input through DAG persistence.
 
-### 验收标准
-- 在 macOS/Linux 本机，无外部重型依赖可运行最小 demo。
-- local/cloud 两种模式切换不改变上层业务语义。
+### Acceptance Criteria
 
-## Phase 5: 工程化与上线准备
+- DAG validation errors are explainable and repairable by retry.
+- End-to-end failures are observable and traceable.
 
-### 研发目标
-- 完善 CI/CD、质量门禁、压测、观测、告警
-- 引入灰度与回滚策略
-- 形成运维手册与 SLO
+## Phase 3: Replanning and Fault Self-Healing
 
-### 可用功能
-- PR 自动测试 + lint + 安全扫描
-- 线上可观测（日志、指标、链路）
+### R&D Goals
 
-### 可测试性
-- 压测（峰值吞吐、尾延迟）
-- 混沌演练（组件级故障注入）
+- Implement Sweeper/Reaper lease-expiration recovery.
+- Integrate structured PatchDAG replanning.
+- Support transactional local hot repair.
 
-### 验收标准
-- 具备小流量灰度发布条件
-- 满足核心 SLO
+### Available Capabilities
 
+- Zombie Tasks can be detected after Worker crashes.
+- Failed DAGs can insert new nodes and continue execution.
 
-## Phase 6: Local-Engine（生产级本地化能力）
+### Testability
 
-### 研发目标
-- 在 Phase 4.5 最小原型基础上，升级为生产级本地化能力。
-- 完整落地 Infra Adapter Layer，保证调度/上下文/图谱接口可插拔。
-- 落地 Aegis 安全加固与长期运行稳定性保障。
+- Fault injection: kill Worker, timeout, and network failure.
+- Transaction rollback test: invalid PatchDAG does not contaminate the original graph.
 
-### 可用功能
-- 本机单机可运行完整 session 生命周期。
-- 本地 Skill 通过受限沙盒执行，具备超时/内存/权限控制。
-- 本地上下文与执行轨迹可查询回放。
+### Acceptance Criteria
 
-### 可测试性
-- 本地 E2E：创建 session -> 执行 DAG -> 结果回读。
-- 安全测试：越权文件访问、死循环、内存膨胀被拦截。
-- 稳定性测试：48h soak 与任务恢复验证。
+- Self-healing paths can reliably restore core business flows.
+- Replanning attempts and success rate have metrics.
 
-### 验收标准
-- 无需额外数据库服务即可在 macOS/Linux 本机运行（最小依赖）。
-- 沙盒策略默认拒绝越权能力，失败可解释。
-- 不影响 cloud 模式既有语义与接口兼容性。
+## Phase 4: Memory and GraphRAG
 
-## 阶段追溯入口
-- Phase 0 progress: `doc/progress/Phase-0-Progress.md`
-- Phase 1 progress: `doc/progress/Phase-1-Progress.md`
-- Decision index: `doc/progress/Decision-Log.md`
-- Hardening cadence: `doc/progress/Hardening-Cadence.md`
+### R&D Goals
+
+- Upgrade `mem3` from a minimal service into an asynchronous memory pipeline.
+- Connect KV for `raw_data` and GraphDB for summaries and entity relations.
+- Provide a secure internal `SearchMemoryGraph` query interface.
+
+### Available Capabilities
+
+- Short-term and long-term memory are separated.
+- Cross-Task memory retrieval is online.
+- Graph queries enforce user/tenant isolation.
+
+### Testability
+
+- Multi-tenant isolation tests prevent cross-tenant reads.
+- Memory extraction quality tests use sampled human review plus automated evaluation.
+
+### Acceptance Criteria
+
+- Cross-session memory recall is usable.
+- No cross-tenant data leakage.
+
+## Phase 4.5: Local-Engine Minimal Prototype (Start Immediately After Mem3)
+
+### R&D Goals
+
+- Start a minimal local-first prototype while preserving the cloud-track mainline.
+- Use existing `arqo + mem3` capabilities to validate a single-machine local execution loop.
+- Freeze key local interfaces and execution protocols to reduce Phase 6 risk.
+
+### Available Capabilities
+
+- Minimal `ARQO_RUNTIME_MODE=local` runtime mode.
+- Local single-machine session execution loop: create, schedule, execute, and read results.
+- Local sandbox execution-plane MVP protocol; prioritize usability before final security hardening.
+
+### Testability
+
+- Local E2E: create session -> execute DAG -> query result.
+- Resource-limit tests: timeout and memory-limit policies take effect.
+- Regression validation: cloud-mode paths remain unchanged.
+
+### Acceptance Criteria
+
+- A minimal demo runs on local macOS/Linux without heavy external dependencies.
+- Switching between local and cloud modes does not change upper-layer business semantics.
+
+## Phase 5: Engineering and Launch Readiness
+
+### R&D Goals
+
+- Improve CI/CD, quality gates, load testing, observability, and alerting.
+- Introduce canary release and rollback strategies.
+- Produce operation manuals and SLOs.
+
+### Available Capabilities
+
+- PR automation for tests, lint, and security scanning.
+- Production observability across logs, metrics, and traces.
+
+### Testability
+
+- Load testing for peak throughput and tail latency.
+- Chaos drills with component-level fault injection.
+
+### Acceptance Criteria
+
+- The system is ready for low-traffic canary releases.
+- Core SLOs are satisfied.
+
+## Phase 6: Local-Engine Production-Grade Local Capability
+
+### R&D Goals
+
+- Upgrade the Phase 4.5 prototype into production-grade local capability.
+- Fully implement the Infra Adapter Layer so scheduling, context, and graph interfaces are pluggable.
+- Implement Aegis security hardening and long-running stability guarantees.
+
+### Available Capabilities
+
+- A full session lifecycle runs on a single local machine.
+- Local Skills execute in a restricted sandbox with timeout, memory, and permission controls.
+- Local context and execution traces can be queried and replayed.
+
+### Testability
+
+- Local E2E: create session -> execute DAG -> read result.
+- Security tests: unauthorized file access, infinite loops, and memory growth are blocked.
+- Stability tests: 48-hour soak and task recovery validation.
+
+### Acceptance Criteria
+
+- The system runs on macOS/Linux without additional database services in the minimal setup.
+- Sandbox policy denies unauthorized capabilities by default and failures are explainable.
+- Cloud-mode semantics and interface compatibility are preserved.
+
+## Phase Traceability Entry Points
+
+- `doc/progress/Decision-Log.md`
+- `doc/progress/Phase-0-Progress.md`
+- `doc/progress/Hardening-Cadence.md`
