@@ -1,7 +1,7 @@
 # <img src="img/icon.png" height="64" style="vertical-align: middle;" /> Aurora Agentic Garden (MVP Scaffold)
 
 This repository contains a runnable multi-language MVP scaffold for the Aurora Agentic Garden:
-- `arqo` (Go): gateway + DAG scheduler core
+- `flory` (Go): gateway + DAG scheduler core
 - `worker-ts` (TypeScript): skill runner with semantic error contract
 - `mem3` (Rust): versioned memory data plane with KV/Graph retrieval
 
@@ -14,7 +14,7 @@ make check-env
 
 ### 2) Run services in 3 terminals
 ```bash
-make run-arqo
+make run-flory
 make run-worker
 make run-mem3
 ```
@@ -67,8 +67,8 @@ make test-fault-ruby
 
 ## Engineering Notes
 
-- Arqo supports in-memory and MySQL/TiDB-compatible scheduler stores.
-- Arqo writes `DAG_CONTEXT` and successful `TASK_OUTPUT` events to Mem3.
+- Flory supports in-memory and MySQL/TiDB-compatible scheduler stores.
+- Flory writes `DAG_CONTEXT` and successful `TASK_OUTPUT` events to Mem3.
 - Every leased task receives Mem3 working memory plus directed retrieval based on its canonical `mem_hint`.
 
 See roadmap: `doc/plan/Phase-Plan.md`.

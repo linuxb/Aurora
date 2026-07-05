@@ -4,7 +4,7 @@ Mem3 is Aurora's unified memory data plane. It owns DAG initialization memory, T
 
 ## 1. Core Principles
 
-1. Scheduling state is stored in Arqo's relational database; memory data is stored in Mem3 KV and Graph stores.
+1. Scheduling state is stored in Flory's relational database; memory data is stored in Mem3 KV and Graph stores.
 2. Every DAG build must extract an intent slot and call one DAG-level Ingest.
 3. Every Task must call Search before execution. Search always assembles the last-N Task outputs and the latest rolling summary, then performs directed retrieval according to `mem_hint`.
 4. Every successfully completed Task, including Skill Nodes and Planner Nodes, must call Task-level Ingest.
@@ -64,19 +64,19 @@ Recommended KV key:
 tenant:{tenant_id}:agent:{agent_id}:session:{session_id}:dag:{dag_id}:task:{sequence}:{task_id}
 ```
 
-`sequence` must be monotonically assigned by Arqo within the same DAG. It must not depend on asynchronous completion order, otherwise parallel Tasks can make last-N memory non-deterministic.
+`sequence` must be monotonically assigned by Flory within the same DAG. It must not depend on asynchronous completion order, otherwise parallel Tasks can make last-N memory non-deterministic.
 
 ## 3. Lifecycle
 
 ### 3.0 End-to-End Memory Sequence
 
-The following diagram shows the standard flow from DAG creation to Task completion. Dashed arrows represent asynchronous processing and do not block Arqo's main scheduling path.
+The following diagram shows the standard flow from DAG creation to Task completion. Dashed arrows represent asynchronous processing and do not block Flory's main scheduling path.
 
 ```mermaid
 sequenceDiagram
     autonumber
     actor User
-    participant Arqo
+    participant Flory
     participant Intent as Intent Router
     participant Planner as DAG Planner
     participant Mem3
@@ -85,34 +85,34 @@ sequenceDiagram
     participant Graph
     participant Worker as Skill/Planner Executor
 
-    User->>Arqo: Submit query
-    Arqo->>Intent: Extract intent slot
-    Intent-->>Arqo: macro_intent, entities, temporal_context, action_verbs
+    User->>Flory: Submit query
+    Flory->>Intent: Extract intent slot
+    Intent-->>Flory: macro_intent, entities, temporal_context, action_verbs
 
-    Arqo->>Mem3: Ingest(DAG_CONTEXT, query, intent_slot)
+    Flory->>Mem3: Ingest(DAG_CONTEXT, query, intent_slot)
     Mem3->>KV: Persist source event
-    Mem3-->>Arqo: 202 Accepted
+    Mem3-->>Flory: 202 Accepted
     Mem3--)Async: Extract goals, profile, facts, relations
     Async--)KV: Store scoped memories
     Async--)Graph: Upsert scoped relations
 
-    Arqo->>Planner: Build and validate DAG
-    Planner-->>Arqo: Nodes with initial mem_hint
+    Flory->>Planner: Build and validate DAG
+    Planner-->>Flory: Nodes with initial mem_hint
 
     loop Every ready Task
-        Arqo->>Mem3: Search(scope, task, recent_limit, final mem_hint)
+        Flory->>Mem3: Search(scope, task, recent_limit, final mem_hint)
         Mem3->>KV: List last-N outputs + latest committed summary
         opt Directed retrieval requested
             Mem3->>KV: KV retrieval
             Mem3->>Graph: Graph retrieval
         end
-        Mem3-->>Arqo: Working memory + directed retrieval
+        Mem3-->>Flory: Working memory + directed retrieval
 
-        Arqo->>Worker: Execute Task with assembled memory
-        Worker-->>Arqo: Task output
-        Arqo->>Mem3: Ingest(TASK_OUTPUT, sequence, output)
+        Flory->>Worker: Execute Task with assembled memory
+        Worker-->>Flory: Task output
+        Flory->>Mem3: Ingest(TASK_OUTPUT, sequence, output)
         Mem3->>KV: Persist immutable Task output
-        Mem3-->>Arqo: 202 Accepted
+        Mem3-->>Flory: 202 Accepted
         Mem3--)Async: Queue ordered summary reduce
         Async->>KV: Read previous committed summary
         Async--)Async: new_summary = LLM(output, previous_summary)
@@ -127,14 +127,14 @@ sequenceDiagram
 User Query
   -> Intent Router structured extraction
   -> Mem3 Ingest(DAG_CONTEXT)
-  -> Arqo builds the DAG with the same intent slot
+  -> Flory builds the DAG with the same intent slot
 ```
 
-Intent Router does not wait for asynchronous GraphRAG construction. Once Mem3 has durably accepted the event, DAG generation can continue. If Ingest is unavailable, Arqo must retry according to policy or mark the DAG as `memory-degraded`; it must not silently drop the event.
+Intent Router does not wait for asynchronous GraphRAG construction. Once Mem3 has durably accepted the event, DAG generation can continue. If Ingest is unavailable, Flory must retry according to policy or mark the DAG as `memory-degraded`; it must not silently drop the event.
 
 ### 3.2 Before Task Start
 
-Before each Task transitions from `READY` to `RUNNING`, Arqo calls:
+Before each Task transitions from `READY` to `RUNNING`, Flory calls:
 
 ```text
 POST /v1/memory/search
@@ -146,9 +146,9 @@ The request must include:
 - The final `mem_hint`, generated or refreshed by the planning LLM after parent Tasks complete.
 - `recent_limit=N`.
 
-The initial DAG stores the initial `mem_hint` for each node. After parent Tasks complete, Arqo calls the planning LLM with parent Task outputs, the child Task goal, and the initial hint to generate the final `mem_hint`, then writes it back to the child Task. Only then can the child Task enter memory assembly. Root Tasks have no parents; their final `mem_hint` is generated by the initial DAG Planner.
+The initial DAG stores the initial `mem_hint` for each node. After parent Tasks complete, Flory calls the planning LLM with parent Task outputs, the child Task goal, and the initial hint to generate the final `mem_hint`, then writes it back to the child Task. Only then can the child Task enter memory assembly. Root Tasks have no parents; their final `mem_hint` is generated by the initial DAG Planner.
 
-For a Task with multiple parents, Arqo must wait for every parent to complete, generate the final `mem_hint` once from all parent outputs, and record the sources in `mem_hint_source_task_ids` in the Search request. The system must not use last-writer-wins semantics based on whichever parent finishes last.
+For a Task with multiple parents, Flory must wait for every parent to complete, generate the final `mem_hint` once from all parent outputs, and record the sources in `mem_hint_source_task_ids` in the Search request. The system must not use last-writer-wins semantics based on whichever parent finishes last.
 
 Search always returns two categories of memory:
 
@@ -162,7 +162,7 @@ Even when `mem_hint.strategy=NONE`, working memory must still be returned. `NONE
 
 ### 3.3 After Task Completion
 
-After each Skill Node or Planner Node succeeds, Arqo calls:
+After each Skill Node or Planner Node succeeds, Flory calls:
 
 ```text
 POST /v1/memory/ingest
@@ -187,7 +187,7 @@ new_summary = lightweight_llm.reduce(
 
 A local `summary` returned by a Skill can only be used as an auxiliary reduce input; it must not replace the rolling summary generated by Mem3. Planner Node planning results are also Task outputs and must be written to Mem3.
 
-Parallel Tasks may complete out of order, so summary reduce must commit in the `sequence` order assigned by Arqo. If an earlier sequence is missing, Mem3 may wait, retry, or place the item into a compensation queue. It must not let asynchronous completion order overwrite the summary.
+Parallel Tasks may complete out of order, so summary reduce must commit in the `sequence` order assigned by Flory. If an earlier sequence is missing, Mem3 may wait, retry, or place the item into a compensation queue. It must not let asynchronous completion order overwrite the summary.
 
 ### 3.4 Multi-Parent Task and Parallel Reduce Sequence
 
@@ -201,26 +201,26 @@ sequenceDiagram
     autonumber
     participant ParentA as Parent Task A (seq 10)
     participant ParentB as Parent Task B (seq 11)
-    participant Arqo
+    participant Flory
     participant Planner as Planning LLM
     participant Mem3
     participant Reducer as Ordered Reducer
     participant Child as Child Task (seq 12)
 
     par Parent tasks execute concurrently
-        ParentA-->>Arqo: Complete(output A)
-        Arqo->>Mem3: Ingest TASK_OUTPUT seq 10
+        ParentA-->>Flory: Complete(output A)
+        Flory->>Mem3: Ingest TASK_OUTPUT seq 10
     and
-        ParentB-->>Arqo: Complete(output B)
-        Arqo->>Mem3: Ingest TASK_OUTPUT seq 11
+        ParentB-->>Flory: Complete(output B)
+        Flory->>Mem3: Ingest TASK_OUTPUT seq 11
     end
 
-    Note over Arqo: Wait until every dependency is SUCCESS
-    Arqo->>Planner: outputs A+B + child goal + initial mem_hint
-    Planner-->>Arqo: final mem_hint + source task ids
-    Arqo->>Mem3: Search(task 12, final mem_hint, sources=[A,B])
-    Mem3-->>Arqo: last-N outputs + latest summary + directed memory
-    Arqo->>Child: Execute with assembled memory
+    Note over Flory: Wait until every dependency is SUCCESS
+    Flory->>Planner: outputs A+B + child goal + initial mem_hint
+    Planner-->>Flory: final mem_hint + source task ids
+    Flory->>Mem3: Search(task 12, final mem_hint, sources=[A,B])
+    Mem3-->>Flory: last-N outputs + latest summary + directed memory
+    Flory->>Child: Execute with assembled memory
 
     Mem3->>Reducer: Queue seq 10 and seq 11
     Reducer->>Reducer: Commit summary for seq 10 first
@@ -266,5 +266,5 @@ If graph writes lag behind, Mem3 may follow `mem_hint.fallback` and fall back to
 - Ingest requests must carry `idempotency_key`; retries must not create duplicate Task Memories or duplicate graph edges.
 - Search can only see summaries whose `summary_version` has been committed.
 - If Task Ingest is accepted but reduce fails, the raw output remains available through List/Search and the background pipeline retries reduce.
-- Arqo does not need to wait for reduce before waking downstream Tasks. If a downstream edge must read the current Task's new summary, the edge can set `memory_barrier=true` and wait for the corresponding `summary_version` to commit.
+- Flory does not need to wait for reduce before waking downstream Tasks. If a downstream edge must read the current Task's new summary, the edge can set `memory_barrier=true` and wait for the corresponding `summary_version` to commit.
 - All long-term memory promotion and graph writes keep source, confidence, and timestamp metadata to support audit, revocation, and forgetting.

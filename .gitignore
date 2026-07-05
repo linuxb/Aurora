@@ -2,7 +2,7 @@
 .cache/
 
 # Go
-apps/arqo/bin/
+apps/flory/bin/
 
 # Node
 apps/worker-ts/node_modules/

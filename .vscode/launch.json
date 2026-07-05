@@ -2,14 +2,14 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Run arqo (Go)",
+      "name": "Run flory (Go)",
       "type": "go",
       "request": "launch",
       "mode": "auto",
-      "program": "${workspaceFolder}/apps/arqo",
+      "program": "${workspaceFolder}/apps/flory",
       "env": {
-        "ARQO_ADDR": ":8080",
-        "ARQO_MEM3_URL": "http://127.0.0.1:8082"
+        "FLORY_ADDR": ":8080",
+        "FLORY_MEM3_URL": "http://127.0.0.1:8082"
       }
     },
     {
@@ -23,7 +23,7 @@
         "src/index.ts"
       ],
       "env": {
-        "ARQO_URL": "http://127.0.0.1:8080",
+        "FLORY_URL": "http://127.0.0.1:8080",
         "WORKER_ID": "vscode-worker-1"
       }
     },

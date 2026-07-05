@@ -1,7 +1,7 @@
 # Local Engine Spec（Draft）
 
 ## 1. Runtime Mode
-- Env: `ARQO_RUNTIME_MODE`
+- Env: `FLORY_RUNTIME_MODE`
 - Enum: `cloud` | `local`
 - Default: `cloud`
 

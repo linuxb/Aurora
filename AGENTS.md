@@ -3,8 +3,8 @@
 ## Project Structure
 - doc/design 设计文档，你可以通过它们了解系统的设计思路，系统架构以及开发Spec。
   - 文档说明
-    - Arqo-JIT.md JIT机制动态扩图方案，对于无法直接映射为已有Skill的Step，需要再次输入LLM进行子图Planning
-    - Intent-Router.md 意图路由模块，描述arqo如何从用户的Prompt分析意图，Skill注入拆解为DAG
+    - Flory-JIT.md JIT机制动态扩图方案，对于无法直接映射为已有Skill的Step，需要再次输入LLM进行子图Planning
+    - Intent-Router.md 意图路由模块，描述flory如何从用户的Prompt分析意图，Skill注入拆解为DAG
     - System-Spec.md 一些协议Spec，模块之间的交互可以参考
     - Aurora-Architechure.md 系统整体架构描述。进行开发计划规划以及进度回顾需要参考。架构review必须参考
     - Plato-GraphRAG.md GraphRAG子系统的详细设计，设计GraphRAG部份需参考

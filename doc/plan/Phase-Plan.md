@@ -28,7 +28,7 @@ This plan is based on the existing design documents and follows a "demoable + te
 ### R&D Goals
 
 - Build a runnable three-language minimal framework:
-  - `arqo` in Go: gateway and DAG state-machine core.
+  - `flory` in Go: gateway and DAG state-machine core.
   - `worker-ts` in TypeScript: Skill execution and semantic errors.
   - `mem3` in Rust: minimal memory controller service.
 - Implement minimal protocols:
@@ -59,7 +59,7 @@ This plan is based on the existing design documents and follows a "demoable + te
 
 ### R&D Goals
 
-- Replace Arqo's in-memory store with MySQL/TiDB.
+- Replace Flory's in-memory store with MySQL/TiDB.
 - Introduce `SKIP LOCKED` claiming and atomic dependency-counter updates.
 - Introduce Redis Pub/Sub for live execution-log events.
 
@@ -158,12 +158,12 @@ This plan is based on the existing design documents and follows a "demoable + te
 ### R&D Goals
 
 - Start a minimal local-first prototype while preserving the cloud-track mainline.
-- Use existing `arqo + mem3` capabilities to validate a single-machine local execution loop.
+- Use existing `flory + mem3` capabilities to validate a single-machine local execution loop.
 - Freeze key local interfaces and execution protocols to reduce Phase 6 risk.
 
 ### Available Capabilities
 
-- Minimal `ARQO_RUNTIME_MODE=local` runtime mode.
+- Minimal `FLORY_RUNTIME_MODE=local` runtime mode.
 - Local single-machine session execution loop: create, schedule, execute, and read results.
 - Local sandbox execution-plane MVP protocol; prioritize usability before final security hardening.
 

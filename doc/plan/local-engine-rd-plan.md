@@ -30,7 +30,7 @@ Conclusion: **the design can proceed**. Implement it with a "minimum viable firs
    - Recommendation: define OS-level isolation as a pluggable strategy. The first version focuses on process-level limits, permission allowlists, and resource quotas. OS sandboxing is an enhancement.
 4. TS runtime boundary.
    - Issue: QuickJS does not natively support TypeScript, so compilation ownership must be explicit.
-   - Recommendation: define `source_code` as JavaScript at the protocol layer. TS-to-JS compilation happens in Arqo or the bundler, while Aegis only executes JS.
+   - Recommendation: define `source_code` as JavaScript at the protocol layer. TS-to-JS compilation happens in Flory or the bundler, while Aegis only executes JS.
 5. Local memory graph engine selection.
    - Issue: KuzuDB ecosystem and bindings require validation; DuckDB graph queries require additional modeling.
    - Recommendation: abstract `IGraphStore` first. Phase A validates the flow with DuckDB plus edge tables; Phase B compares Kuzu performance.
@@ -41,7 +41,7 @@ Conclusion: **the design can proceed**. Implement it with a "minimum viable firs
 
 - Goal: turn Local Engine into an orchestratable runtime mode without changing main business semantics.
 - Deliverables:
-  - Add runtime mode switch: `ARQO_RUNTIME_MODE=cloud|local`.
+  - Add runtime mode switch: `FLORY_RUNTIME_MODE=cloud|local`.
   - Freeze three interfaces: `ITaskStateStore`, `IContextStore`, and `IGraphStore`.
   - Minimal local scheduler: SQLite plus single-writer scheduling loop.
 - Acceptance: complete one full session path on macOS within 10 minutes.

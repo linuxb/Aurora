@@ -107,7 +107,7 @@ To prevent hallucinated or disconnected repair graphs, the Replanner prompt must
 
 TS Skills must return two data tracks to separate compute flow from state flow:
 
-- `raw_data`: raw payload, JSON or text, saved by Arqo through Mem3 Task Ingest.
+- `raw_data`: raw payload, JSON or text, saved by Flory through Mem3 Task Ingest.
 - `summary`: optional local hint from the Skill. It can help Mem3 reduce but does not become the cross-Task rolling summary.
 
 ```ts

@@ -24,7 +24,7 @@ The original design only partially satisfied the target lifecycle and had the fo
 
 - Every DAG build calls `Ingest(kind=DAG_CONTEXT)` and asynchronously extracts Goals, Profile items, Facts, and Relations.
 - Every Task calls Search before start; Search always assembles last-N outputs and the latest committed rolling summary.
-- After parent Tasks complete, Arqo uses parent output and child goal to generate or refresh the child's final `mem_hint`.
+- After parent Tasks complete, Flory uses parent output and child goal to generate or refresh the child's final `mem_hint`.
 - Every Skill/Planner Task calls `Ingest(kind=TASK_OUTPUT)` after completion.
 - Mem3 serially executes by DAG `sequence`:
 
@@ -32,7 +32,7 @@ The original design only partially satisfied the target lifecycle and had the fo
 new_summary = lightweight_llm(output, last_summary)
 ```
 
-- LLM-generated `mem_hint` does not carry security boundaries. `tenant_id/agent_id/session_id/dag_id` are injected by Arqo from trusted metadata.
+- LLM-generated `mem_hint` does not carry security boundaries. `tenant_id/agent_id/session_id/dag_id` are injected by Flory from trusted metadata.
 - Ingest uses idempotency keys and quickly returns `202 Accepted`; raw output, summary reduce, and graph writes are decoupled.
 
 ## Diagram Additions

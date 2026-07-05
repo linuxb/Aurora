@@ -4,19 +4,19 @@
 - `2026-04-18T18:40:00+08:00`
 
 ## Scope of Current Increment
-- Add a usable real-time event flow in `arqo`.
+- Add a usable real-time event flow in `flory`.
 - Keep implementation testable locally before wiring Redis backend.
 
 ## Delivered in This Increment
-- `arqo` in-process event broker (`internal/events`).
-- `arqo` telemetry ingest endpoint: `POST /v1/telemetry`.
-- `arqo` SSE stream endpoint: `GET /v1/sessions/{sessionID}/events`.
-- `arqo` system events on session/task lifecycle.
-- `worker-ts` telemetry forwarding to `arqo`.
-- `arqo` event backend abstraction (`memory` / `redis`).
+- `flory` in-process event broker (`internal/events`).
+- `flory` telemetry ingest endpoint: `POST /v1/telemetry`.
+- `flory` SSE stream endpoint: `GET /v1/sessions/{sessionID}/events`.
+- `flory` system events on session/task lifecycle.
+- `worker-ts` telemetry forwarding to `flory`.
+- `flory` event backend abstraction (`memory` / `redis`).
 - Redis Pub/Sub broker implementation (channel per session).
-- Startup backend selection by env (`ARQO_EVENT_BACKEND`), with default `memory`.
-- Docker Compose `arqo` defaults to Redis event backend for integration runs.
+- Startup backend selection by env (`FLORY_EVENT_BACKEND`), with default `memory`.
+- Docker Compose `flory` defaults to Redis event backend for integration runs.
 - Scheduler backend abstraction (`memory` / `mysql`) with env selection.
 - MySQL scheduler store implementation (schema bootstrap + transactional pull/complete path).
 - Mock-based backend selection tests without requiring live MySQL.
@@ -25,14 +25,14 @@
   - `docker-compose.dev.yml` for dependency-only local debug
   - `docker-compose.yml` for full-stack system runs
 - Real docker-compose integration run completed on `2026-04-19`:
-  - MySQL scheduler backend (`ARQO_SCHEDULER_BACKEND=mysql`) validated with real task lifecycle persistence.
-  - Redis event backend (`ARQO_EVENT_BACKEND=redis`) validated with SSE event stream.
+  - MySQL scheduler backend (`FLORY_SCHEDULER_BACKEND=mysql`) validated with real task lifecycle persistence.
+  - Redis event backend (`FLORY_EVENT_BACKEND=redis`) validated with SSE event stream.
   - End-to-end demo DAG (`QueryLog -> LLMSummarize -> SendEmail`) completed with final `DAG=SUCCESS`.
 - Fixed MySQL `PullReadyTask` scan mismatch bug found during integration:
   - Symptom: `POST /v1/tasks/pull` returned `500`, message: `sql: expected 7 destination arguments in Scan, not 12`.
   - Root cause: Ready-task query selected 7 columns but used 12-column scanner.
   - Fix: Added dedicated ready-task scanner path and covered by unit test.
-- Added TiDB-compatible scheduler backend entry (`ARQO_SCHEDULER_BACKEND=tidb`) reusing mysql-compatible SQL path.
+- Added TiDB-compatible scheduler backend entry (`FLORY_SCHEDULER_BACKEND=tidb`) reusing mysql-compatible SQL path.
 - Added concurrency safety tests in scheduler memory engine:
   - concurrent pull duplicate-lease prevention
   - concurrent complete idempotency and dependency-counter underflow guard
@@ -45,13 +45,13 @@
   - SQL store now persists DAG guardrails (`current_depth`, `max_depth`) and task `parameters_json`.
   - `CompleteTask` supports transactional expansion apply with depth guardrail and downstream dependency redirection.
   - `planning_mode=jit` creation path is now supported by MySQL/TiDB scheduler backend.
-- Refactor note: MySQL/TiDB scheduler SQL access cleanup is tracked in `doc/refactor/2026-05-11-arqo-sql-access-refactor.md`.
+- Refactor note: MySQL/TiDB scheduler SQL access cleanup is tracked in `doc/refactor/2026-05-11-flory-sql-access-refactor.md`.
 
 ## Integration Verification (2026-04-19T23:00:00+08:00)
 - Environment:
   - Infra from `make infra-up` already running: `mysql`, `redis`, `kvrocks`, `memgraph`.
-  - `arqo` launched with MySQL scheduler + Redis broker.
-  - `worker-ts` launched against local `arqo`.
+  - `flory` launched with MySQL scheduler + Redis broker.
+  - `worker-ts` launched against local `flory`.
 - Network diagnostics summary:
   - Sandbox mode could not directly reach local ports (`127.0.0.1:3306/6379/7890`) or `proxy.golang.org`.
   - Elevated mode could reach local proxy `127.0.0.1:7890` and external Go proxy.
@@ -95,7 +95,7 @@
 
 ## Phase 1 Exit Decision (2026-05-05T11:20:00+08:00)
 - Decision: do not block overall roadmap on remaining optimization items.
-- Rationale: current `arqo + worker-ts` mainline is functional, testable, and already supports JIT expansion semantics in both memory and MySQL/TiDB SQL paths.
+- Rationale: current `flory + worker-ts` mainline is functional, testable, and already supports JIT expansion semantics in both memory and MySQL/TiDB SQL paths.
 - Action:
   - Keep the two pending items as a dedicated hardening track.
   - Continue core feature delivery in the next phase, with periodic regression checks.

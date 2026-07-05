@@ -37,20 +37,20 @@ If `mysql` CLI is missing on macOS:
 brew install mysql-client
 ```
 
-## 4) Run arqo with mysql scheduler backend
+## 4) Run flory with mysql scheduler backend
 
 Enable mysql driver once:
 
 ```bash
-cd /Users/linzhenbin/workspace/my_proj/aurora/apps/arqo
+cd /Users/linzhenbin/workspace/my_proj/aurora/apps/flory
 go get github.com/go-sql-driver/mysql@latest
 ```
 
 ```bash
-cd /Users/linzhenbin/workspace/my_proj/aurora/apps/arqo
-ARQO_SCHEDULER_BACKEND=mysql \
-ARQO_MYSQL_DSN='aurora:aurora@tcp(127.0.0.1:3306)/aurora?parseTime=true&multiStatements=true' \
-ARQO_EVENT_BACKEND=memory \
+cd /Users/linzhenbin/workspace/my_proj/aurora/apps/flory
+FLORY_SCHEDULER_BACKEND=mysql \
+FLORY_MYSQL_DSN='aurora:aurora@tcp(127.0.0.1:3306)/aurora?parseTime=true&multiStatements=true' \
+FLORY_EVENT_BACKEND=memory \
 go run -tags mysql_driver .
 ```
 
@@ -64,4 +64,4 @@ curl -sS -X POST http://127.0.0.1:8080/v1/sessions \
 
 ## Notes
 - Current repository includes mysql scheduler logic with optional driver tag import.
-- If startup reports mysql driver is not registered, run the `go get` step and start `arqo` with `-tags mysql_driver`.
+- If startup reports mysql driver is not registered, run the `go get` step and start `flory` with `-tags mysql_driver`.

@@ -112,12 +112,12 @@ When Replanning is triggered, the cloud LLM must output PatchDAG in `json_schema
 
 ### **3.1 Dual-Track Return Contract**
 
-After execution, a TS Worker returns raw output and may provide a local Skill summary. Arqo must write the complete result through Mem3 `Ingest(kind=TASK_OUTPUT)`. The local summary can only assist asynchronous reduce and must not replace the Mem3 rolling summary.
+After execution, a TS Worker returns raw output and may provide a local Skill summary. Flory must write the complete result through Mem3 `Ingest(kind=TASK_OUTPUT)`. The local summary can only assist asynchronous reduce and must not replace the Mem3 rolling summary.
 
 ```ts
 // Core TS SDK interface.
 export interface SkillResult {
-  // Raw packet saved by Arqo through Mem3 Ingest.
+  // Raw packet saved by Flory through Mem3 Ingest.
   raw_data: unknown;
   // Optional local Skill hint, not the cross-Task rolling summary.
   summary?: string;
@@ -126,10 +126,10 @@ export interface SkillResult {
 
 ### **3.2 Task Memory Lifecycle**
 
-1. After parent Tasks complete, Arqo calls the planning LLM with parent Task outputs and the child Task goal to generate or refresh the child's final `mem_hint`. Multi-parent nodes must merge all parent outputs and generate the final hint once.
-2. Before a Task transitions from `READY` to `RUNNING`, Arqo calls Mem3 Search with trusted scope, current Task, `recent_limit`, and the final `mem_hint`.
+1. After parent Tasks complete, Flory calls the planning LLM with parent Task outputs and the child Task goal to generate or refresh the child's final `mem_hint`. Multi-parent nodes must merge all parent outputs and generate the final hint once.
+2. Before a Task transitions from `READY` to `RUNNING`, Flory calls Mem3 Search with trusted scope, current Task, `recent_limit`, and the final `mem_hint`.
 3. Search always returns last-N outputs and the latest committed rolling summary, plus directed retrieval results.
-4. After every `skill` or `planner` Task succeeds, Arqo calls Mem3 Task Ingest.
+4. After every `skill` or `planner` Task succeeds, Flory calls Mem3 Task Ingest.
 5. Mem3 asynchronously computes `new_summary = lightweight_llm(output, last_summary)` and commits summary versions serially by DAG `sequence`.
 
 Complete JSON schemas are in `doc/spec/Mem3-API-Spec.md`.
@@ -167,7 +167,7 @@ During execution, Workers must report fine-grained progress to the Go gateway th
 
 ### **4.1 Asynchronous Side-Path Extraction Pipeline**
 
-During every DAG build, Arqo sends `DAG_CONTEXT` Ingest. After every successful Task, it sends `TASK_OUTPUT` Ingest. After durable acceptance, Mem3 uses an internal queue to asynchronously perform summary reduce, fact extraction, and graph writes.
+During every DAG build, Flory sends `DAG_CONTEXT` Ingest. After every successful Task, it sends `TASK_OUTPUT` Ingest. After durable acceptance, Mem3 uses an internal queue to asynchronously perform summary reduce, fact extraction, and graph writes.
 
 - **Rolling summary**: read current Task output and the previous committed summary to generate a new rolling summary.
 - **Fact and relation extraction**: may read policy-permitted output, local Skill summary, and DAG intent slot. It must not depend on or persist private chain-of-thought.

@@ -5,15 +5,15 @@
 
 ## Scope
 - Rename the Rust memory service from Polaris to Mem3.
-- Align Arqo intent planning, DAG persistence, task dispatch, and task completion with the reviewed Mem3 lifecycle.
+- Align Flory intent planning, DAG persistence, task dispatch, and task completion with the reviewed Mem3 lifecycle.
 - Replace legacy memory query payloads with the versioned Mem3 Ingest/Search contracts.
 
 ## Delivered
 - Moved the Rust service from `apps/polaris` to `apps/mem3`.
-- Renamed runtime configuration from `POLARIS_*` / `ARQO_POLARIS_*` to `MEM3_*` / `ARQO_MEM3_*`.
+- Renamed runtime configuration from `POLARIS_*` / `FLORY_POLARIS_*` to `MEM3_*` / `FLORY_MEM3_*`.
 - Added `POST /v1/memory/ingest` for `DAG_CONTEXT` and `TASK_OUTPUT`.
 - Added `POST /v1/memory/search` with trusted scope, current Task metadata, recent window, canonical `mem_hint`, working memory, retrieval, and consistency sections.
-- Split the Arqo planning lifecycle into intent extraction and context-aware DAG planning when the router supports those capabilities.
+- Split the Flory planning lifecycle into intent extraction and context-aware DAG planning when the router supports those capabilities.
 - Pre-allocated `session_id` and `dag_id` so `DAG_CONTEXT` uses the same trusted scope later persisted by the scheduler.
 - Added `tenant_id`, `agent_id`, Task `sequence`, `goal`, and canonical `mem_hint` to scheduler domain and MySQL persistence.
 - Changed external node types to `skill` and `planner`; legacy values remain parse-only compatibility aliases.
@@ -21,11 +21,11 @@
 - Updated TS Worker expansion payloads, Docker Compose, Make targets, VS Code settings, README, and Ruby system fixtures.
 
 ## Compatibility
-- Arqo accepts legacy `SKILL_SINK`, `EXPAND_PLANNING`, `EXPANDING`, and `GRAPH_TRAVERSAL` values while normalizing persisted and emitted values to the reviewed contract.
-- Legacy Mem3 endpoints remain available temporarily, but Arqo no longer calls them.
+- Flory accepts legacy `SKILL_SINK`, `EXPAND_PLANNING`, `EXPANDING`, and `GRAPH_TRAVERSAL` values while normalizing persisted and emitted values to the reviewed contract.
+- Legacy Mem3 endpoints remain available temporarily, but Flory no longer calls them.
 
 ## Verification
-- `cd apps/arqo && GOCACHE=/Users/linzhenbin/workspace/my_proj/aurora/.cache/go-build go test ./...`
+- `cd apps/flory && GOCACHE=/Users/linzhenbin/workspace/my_proj/aurora/.cache/go-build go test ./...`
 - `cargo test --manifest-path apps/mem3/Cargo.toml`
 - Ruby syntax checks for the updated system-test fixtures.
 - `git diff --check`

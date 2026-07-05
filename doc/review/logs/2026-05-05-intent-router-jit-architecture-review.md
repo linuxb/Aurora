@@ -42,5 +42,5 @@ The fix has been completed and tests passed. The implementation now matches the 
 
 ## Verification
 
-- Command: `cd apps/arqo && GOCACHE=/Users/linzhenbin/workspace/my_proj/aurora/.cache/go-build go test ./...`
+- Command: `cd apps/flory && GOCACHE=/Users/linzhenbin/workspace/my_proj/aurora/.cache/go-build go test ./...`
 - Result: `internal/api`, `internal/planner`, and `internal/scheduler` all passed.

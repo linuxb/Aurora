@@ -5,12 +5,12 @@
 - Status: completed
 
 ## Goals
-- Build a runnable minimal multi-language framework: `arqo` + `worker-ts` + `mem3`.
+- Build a runnable minimal multi-language framework: `flory` + `worker-ts` + `mem3`.
 - Complete core state transitions and minimum testable units.
 - Complete the local development toolchain and IDE debugging configuration.
 
 ## Completed Work
-- `arqo`:
+- `flory`:
   - Session creation, task pull, task completion, and healthz.
   - Basic DAG/task state machine.
   - Minimal sweeper for expired task recovery.
@@ -24,7 +24,7 @@
   - Basic lint/format configuration.
 
 ## Validation Results
-- `go test ./...` passed for the initial Arqo modules.
+- `go test ./...` passed for the initial Flory modules.
 - `cargo test` passed for the initial Mem3 modules.
 - Manual local demo path was verified.
 

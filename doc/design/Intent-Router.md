@@ -19,30 +19,30 @@ Every DAG Node, also called a Step, belongs to exactly one of two types: a Skill
 sequenceDiagram
     autonumber
     actor User
-    participant Arqo
+    participant Flory
     participant Router as Intent Router
     participant Mem3
     participant Planner as DAG Planner
     participant Validator
     participant DB as Scheduler DB
 
-    User->>Arqo: Submit query
-    Arqo->>Router: Extract intent slot
-    Router-->>Arqo: Structured intent slot
-    Arqo->>Mem3: Ingest DAG_CONTEXT
-    Mem3-->>Arqo: 202 Accepted
+    User->>Flory: Submit query
+    Flory->>Router: Extract intent slot
+    Router-->>Flory: Structured intent slot
+    Flory->>Mem3: Ingest DAG_CONTEXT
+    Mem3-->>Flory: 202 Accepted
     Note right of Mem3: Async extract goals, profile,<br/>facts and relations
 
-    Arqo->>Planner: Query + intent slot + Skill schemas
-    Planner-->>Arqo: DAG nodes + initial mem_hint
-    Arqo->>Validator: Validate schema and topology
+    Flory->>Planner: Query + intent slot + Skill schemas
+    Planner-->>Flory: DAG nodes + initial mem_hint
+    Flory->>Validator: Validate schema and topology
 
     alt Validation succeeds
-        Validator-->>Arqo: Valid DAG
-        Arqo->>DB: Persist DAG and Tasks
+        Validator-->>Flory: Valid DAG
+        Flory->>DB: Persist DAG and Tasks
     else Validation fails
-        Validator-->>Arqo: Structured validation error
-        Arqo->>Planner: Repair prompt
+        Validator-->>Flory: Structured validation error
+        Flory->>Planner: Repair prompt
     end
 ```
 
@@ -102,7 +102,7 @@ A lightweight open-source model, recommended as Llama-3-8B-Instruct, is placed a
 
 ### **2.3 Mem3 DAG Context Ingest**
 
-After intent-slot extraction succeeds, Arqo must first call Mem3 `Ingest(kind=DAG_CONTEXT)`. The request carries trusted execution boundaries `tenant_id/agent_id/session_id/dag_id`, the raw query, and the full intent slot. Intent Router does not create long-term memory entries by itself. After Mem3 returns `202 Accepted`, it asynchronously extracts Goals, Profile items, Facts, and Relations, then writes them to KV/Graph.
+After intent-slot extraction succeeds, Flory must first call Mem3 `Ingest(kind=DAG_CONTEXT)`. The request carries trusted execution boundaries `tenant_id/agent_id/session_id/dag_id`, the raw query, and the full intent slot. Intent Router does not create long-term memory entries by itself. After Mem3 returns `202 Accepted`, it asynchronously extracts Goals, Profile items, Facts, and Relations, then writes them to KV/Graph.
 
 The complete request and asynchronous extraction schemas are in `doc/spec/Mem3-API-Spec.md`. Intent Router must not promote information to Agent or Tenant scope by itself.
 
@@ -173,7 +173,7 @@ DAG generation supports two Node types: Skill Node and Planner Node.
 **DAG Build Flow**
 
 ```go
-package arqo
+package flory
 
 import "context"
 
@@ -195,7 +195,7 @@ type Node struct {
     SkillName    string                 // Valid only when Type == NodeTypeSkill.
     Goal         string                 // Valid only when Type == NodeTypePlanner.
     Parameters   map[string]interface{}
-    MemHint      MemHint                // Passed unchanged by Arqo to Mem3 Search before Task start.
+    MemHint      MemHint                // Passed unchanged by Flory to Mem3 Search before Task start.
     Dependencies []string
 }
 
@@ -221,7 +221,7 @@ func (o *Orchestrator) GenerateInitialDAG(ctx context.Context, intent IntentCont
     return parseToNodes(dagJSON), nil
 }
 
-// ==================== 3. Arqo Dispatcher: node execution and JIT expansion ====================
+// ==================== 3. Flory Dispatcher: node execution and JIT expansion ====================
 
 type Dispatcher struct {
     LLMClient *LLMProxy
@@ -269,10 +269,10 @@ func (d *Dispatcher) spawnSubDAG(ctx context.Context, plannerNode *Node, memoryC
 ```
 
 - The initial DAG Planner must generate an initial `mem_hint` for every node and the final value directly for root nodes.
-- After all parents of a non-root Task complete, Arqo calls the planning LLM with parent Task outputs, the child Task goal, and the initial hint to generate the child's final `mem_hint`.
+- After all parents of a non-root Task complete, Flory calls the planning LLM with parent Task outputs, the child Task goal, and the initial hint to generate the child's final `mem_hint`.
 - Multi-parent Tasks must generate the final value once from all parent outputs. The last finishing parent must not overwrite other sources.
 - When a Planner Node dynamically expands the graph, it must also generate an initial `mem_hint` for every direct child node.
-- Before every Task transitions from `READY` to `RUNNING`, Arqo must call Mem3 Search and retrieve last-N outputs, the latest rolling summary, and directed results based on `mem_hint`.
+- Before every Task transitions from `READY` to `RUNNING`, Flory must call Mem3 Search and retrieve last-N outputs, the latest rolling summary, and directed results based on `mem_hint`.
 - LLM calls are also modeled as predefined system Skills.
 - If a Node expands the DAG multiple times but still cannot map to a concrete Skill, the system must surface this to the UI by raising an error that indicates a new Skill is required or that the requested operation cannot be performed.
 

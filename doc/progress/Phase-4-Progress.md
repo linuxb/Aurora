@@ -21,8 +21,8 @@
 - Added unit tests:
   - ingest payload parsing with `user_id` requirement
   - search filtering for user-scope + limit behavior
-- Added `arqo -> mem3` retrieval integration on session planning:
-  - `arqo` optionally calls `mem3 /memory/search` when `ARQO_MEM3_URL` is configured
+- Added `flory -> mem3` retrieval integration on session planning:
+  - `flory` optionally calls `mem3 /memory/search` when `FLORY_MEM3_URL` is configured
   - memory hits are injected into planner `intent_context` as:
     - `memory_hits`
     - `memory_hit_count`
@@ -59,12 +59,12 @@
   - infer relation types (`status_of`, `happened_at`, `executed_by`, fallback `co_occurs`)
   - preserve endpoint contract while improving semantics for downstream GraphRAG use
   - added unit assertions for typed nodes and typed relations
-- Added `arqo -> mem3` memory-query strategy controls:
-  - query rewrite policy via `ARQO_MEMORY_QUERY_REWRITE` (`none`/`trim`)
-  - hit-ranking policy via `ARQO_MEMORY_HIT_RANK` (`none`/`short_first`/`long_first`)
-  - timeout policy via `ARQO_MEM3_TIMEOUT_MS`
-  - fallback policy via `ARQO_MEMORY_FALLBACK_STRICT` (strict fail vs best-effort empty)
-  - default hit limit via `ARQO_MEMORY_HIT_LIMIT`
+- Added `flory -> mem3` memory-query strategy controls:
+  - query rewrite policy via `FLORY_MEMORY_QUERY_REWRITE` (`none`/`trim`)
+  - hit-ranking policy via `FLORY_MEMORY_HIT_RANK` (`none`/`short_first`/`long_first`)
+  - timeout policy via `FLORY_MEM3_TIMEOUT_MS`
+  - fallback policy via `FLORY_MEMORY_FALLBACK_STRICT` (strict fail vs best-effort empty)
+  - default hit limit via `FLORY_MEMORY_HIT_LIMIT`
   - added unit tests for rewrite/ranking/fallback/config parsing
 - Refactored `mem3` into modules for maintainability:
   - `types.rs`: shared request/response/domain structs
@@ -77,7 +77,7 @@
   - `GET /memory/list` supports recent window retrieval by `user_id/session_id/dag_id/limit`
   - `POST /memory/search_by_hint` supports `KV_POINT_GET` / `GRAPH_TRAVERSAL` / `NONE`
   - RBO short-circuit for recent-context query and fallback scan path for empty graph traversal
-  - `step_id == arqo task_id` is enforced as a single internal source-of-truth (`task_id`)
+  - `step_id == flory task_id` is enforced as a single internal source-of-truth (`task_id`)
 - Added unit tests for Phase 4 memory core:
   - store scoping (`user/session/dag`) verification
   - rolling summary + hard_facts merge behavior
@@ -173,16 +173,16 @@
   - `model/` (`types`)
   - updated imports/module wiring in `main.rs` without behavior change
   - verified full test pass after refactor
-- Integrated `arqo -> mem3` mem_hint query path:
+- Integrated `flory -> mem3` mem_hint query path:
   - `Mem3MemoryClient` now supports `SearchByHint` (`POST /memory/search_by_hint`)
-  - enabled via `ARQO_MEMORY_HINT_ENABLED=true`
+  - enabled via `FLORY_MEMORY_HINT_ENABLED=true`
   - strategy inference baseline: relation/dependency/impact => `GRAPH_TRAVERSAL`, task/step mention => `KV_POINT_GET`, otherwise `NONE`
   - `createSession` now tries hint-based retrieval first, then falls back to legacy `/memory/search`
   - added unit tests for hint request payload + strategy inference
 
 ## Verification
 - `cargo test` in `apps/mem3` should pass with new memory retrieval tests.
-- `go test ./...` in `apps/arqo` should pass with memory injection API tests.
+- `go test ./...` in `apps/flory` should pass with memory injection API tests.
 
 ## Pending in Phase 4
 - Harden `memgraph_bolt` path to production level:

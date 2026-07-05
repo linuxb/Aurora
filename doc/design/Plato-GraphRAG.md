@@ -39,7 +39,7 @@ pub trait GraphAnalyticsAdapter {
 
 ## **4. Asynchronous Macro-Summary Generation Pipeline (Threshold Triggered)**
 
-Macro-summary generation is expensive because it calls an LLM, so it must never run synchronously on Arqo's Task execution critical path.
+Macro-summary generation is expensive because it calls an LLM, so it must never run synchronously on Flory's Task execution critical path.
 
 ### **4.1 Dirty Edge Counter**
 
@@ -63,7 +63,7 @@ When a threshold fires, the Rust background daemon runs this workflow:
 
 ## **5. Smart Query Routing by `mem_hint` (CBO)**
 
-After parent Tasks complete, Arqo calls the planning LLM with parent Task output and the child Task goal to generate the child Task's final `mem_hint`. Before the child Task starts, Mem3 Search interprets the hint and routes to Plato only when graph retrieval is required.
+After parent Tasks complete, Flory calls the planning LLM with parent Task output and the child Task goal to generate the child Task's final `mem_hint`. Before the child Task starts, Mem3 Search interprets the hint and routes to Plato only when graph retrieval is required.
 
 ### **5.1 `mem_hint` Schema Contract**
 
@@ -77,7 +77,7 @@ After parent Tasks complete, Arqo calls the planning LLM with parent Task output
 }
 ```
 
-The complete schema lives in `doc/spec/Mem-Hint-Schema.md`. Tenant, Agent, Session, and DAG security scopes must not be written by the LLM into `mem_hint`; Arqo injects them through the trusted scope of the Mem3 Search request.
+The complete schema lives in `doc/spec/Mem-Hint-Schema.md`. Tenant, Agent, Session, and DAG security scopes must not be written by the LLM into `mem_hint`; Flory injects them through the trusted scope of the Mem3 Search request.
 
 ### **5.2 LOCAL Routing (Micro Walk)**
 
@@ -85,7 +85,7 @@ The complete schema lives in `doc/spec/Mem-Hint-Schema.md`. Tenant, Agent, Sessi
 - **Execution**:
   1. Use `keywords` as anchors to locate Entity nodes in the underlying graph.
   2. Walk 1~2 hops along observed relation edges.
-  3. Return hard facts and relations collected on the path to Arqo.
+  3. Return hard facts and relations collected on the path to Flory.
 - **Property**: very low latency and high freshness, including data written moments earlier.
 
 ### **5.3 GLOBAL Routing (Macro Summary)**
@@ -93,5 +93,5 @@ The complete schema lives in `doc/spec/Mem-Hint-Schema.md`. Tenant, Agent, Sessi
 - **Trigger**: system evolution, architecture-level assessment, or large-span historical summaries.
 - **Execution (Map-Reduce)**:
   1. **Map**: skip thousands of low-level micro nodes and retrieve Community nodes directly. Use vector similarity or keywords to find the top-3 `macro_summary` values most relevant to `query.text`.
-  2. **Reduce**: concatenate the three dense community summaries without a second LLM call and return them to Arqo as high-density context.
+  2. **Reduce**: concatenate the three dense community summaries without a second LLM call and return them to Flory as high-density context.
 - **Property**: answers high-dimensional architecture questions with very low token cost and avoids getting lost in micro-level graph details.

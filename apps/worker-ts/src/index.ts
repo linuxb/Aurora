@@ -2,7 +2,7 @@ import { runSkill } from "./skills.ts";
 import { AuroraSkillError } from "./types.ts";
 import type { Task, TelemetryEventType } from "./types.ts";
 
-const gatewayURL = process.env.ARQO_URL ?? "http://127.0.0.1:8080";
+const gatewayURL = process.env.FLORY_URL ?? "http://127.0.0.1:8080";
 const workerID = process.env.WORKER_ID ?? "worker-ts-1";
 const loopIntervalMS = Number(process.env.WORKER_LOOP_INTERVAL_MS ?? "800");
 
@@ -73,6 +73,13 @@ async function runOnce(): Promise<boolean> {
   await emitTelemetry("NODE_START", task.task_id, `Start executing skill=${task.skill_name}`);
 
   try {
+    if (!task.skill_name) {
+      throw new AuroraSkillError(
+        "UNKNOWN",
+        "task has no executable skill",
+        `Missing skill_name for task ${task.task_id}`,
+      );
+    }
     const response = await runSkill(task.skill_name, task.task_id, task.parameters);
     await emitTelemetry("NODE_FINISH", task.task_id, response.summary);
     await completeTask(task.task_id, {
@@ -102,7 +109,7 @@ async function runOnce(): Promise<boolean> {
 }
 
 async function main(): Promise<void> {
-  console.log(`[worker-ts] start worker_id=${workerID} arqo=${gatewayURL}`);
+  console.log(`[worker-ts] start worker_id=${workerID} flory=${gatewayURL}`);
 
   while (true) {
     try {

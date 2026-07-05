@@ -101,16 +101,16 @@ This file records architecture and product decisions with traceability.
 - `status`: decided
 - `decision`: Introduce `ReActPlanner` as a first-class Planner node and support JIT DAG expansion through `SUCCESS_AND_EXPAND`-style completion payloads.
 - `context`: Static AOT DAGs are not expressive enough for ReAct-style agent execution.
-- `impact`: `arqo` can now grow a DAG at runtime in the memory scheduler, including downstream dependency redirection.
+- `impact`: `flory` can now grow a DAG at runtime in the memory scheduler, including downstream dependency redirection.
 - `owner`: user + assistant
-- `source`: conversation + `doc/design/arqo-jit.md`
+- `source`: conversation + `doc/design/flory-jit.md`
 - `follow_up`: Add SQL-backed transactional expansion for MySQL/TiDB and define guardrail persistence fields.
 
 ### 2026-05-05T10:30:00+08:00 | Phase 1 | MySQL/TiDB transactional JIT expansion parity
 - `status`: decided
 - `decision`: Apply the same JIT expansion semantics used by memory scheduler into MySQL/TiDB transaction flow, including depth guardrails and downstream rewiring.
 - `context`: JIT planner behavior must stay consistent across scheduler backends.
-- `impact`: `arqo` MySQL/TiDB backends now support planner-driven dynamic DAG growth atomically.
+- `impact`: `flory` MySQL/TiDB backends now support planner-driven dynamic DAG growth atomically.
 - `owner`: user + assistant
 - `source`: conversation + `doc/progress/Phase-1-Progress.md`
 - `follow_up`: Execute real TiDB integration run and add backend-level concurrency tests.
@@ -140,11 +140,11 @@ This file records architecture and product decisions with traceability.
 - `impact`: Establishes user-scoped memory query interface required by later GraphRAG and planner context injection.
 - `owner`: user + assistant
 - `source`: conversation + `doc/progress/Phase-4-Progress.md`
-- `follow_up`: Integrate `arqo -> mem3` retrieval path in next increment.
+- `follow_up`: Integrate `flory -> mem3` retrieval path in next increment.
 
 ### 2026-05-09T10:50:00+08:00 | Phase 4 | Prefer mature dependencies and configurable memory query strategy
 - `status`: decided
-- `decision`: Replace custom HTTP parsing path in `mem3` with `axum/serde` and complete `arqo` memory-query controls (rewrite/rank/timeout/fallback).
+- `decision`: Replace custom HTTP parsing path in `mem3` with `axum/serde` and complete `flory` memory-query controls (rewrite/rank/timeout/fallback).
 - `context`: User requested avoiding wheel reinvention and prioritizing mainstream third-party packages for stable delivery speed.
 - `impact`: Reduces parser maintenance risk, standardizes protocol handling, and makes retrieval behavior tunable by environment without code changes.
 - `owner`: user + assistant
@@ -162,8 +162,8 @@ This file records architecture and product decisions with traceability.
 ### 2026-05-11T23:55:00+08:00 | Phase 4 | Mem3 modularization and API alignment
 - `status`: decided
 - `decision`: Refactor `mem3` into module boundaries and align memory API to `Mem3.md` (`ingest/list/search_by_hint`) while enforcing `step_id` as alias of `task_id`.
-- `context`: User requested maintainable module design and confirmed `step_id` equals `arqo` `task_id`.
-- `impact`: Reduced single-file complexity, clearer extension points for future graph backend adapters, and stronger contract consistency between Arqo and Mem3.
+- `context`: User requested maintainable module design and confirmed `step_id` equals `flory` `task_id`.
+- `impact`: Reduced single-file complexity, clearer extension points for future graph backend adapters, and stronger contract consistency between Flory and Mem3.
 - `owner`: user + assistant
 - `source`: conversation + `doc/design/Mem3.md` + `doc/progress/Phase-4-Progress.md`
 - `follow_up`: Add graph backend adapter parity and configurable extraction dictionary.

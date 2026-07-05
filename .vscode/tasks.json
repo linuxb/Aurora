@@ -9,9 +9,9 @@
       "problemMatcher": []
     },
     {
-      "label": "make run-arqo",
+      "label": "make run-flory",
       "type": "shell",
-      "command": "make run-arqo",
+      "command": "make run-flory",
       "problemMatcher": []
     },
     {

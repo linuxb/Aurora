@@ -42,7 +42,7 @@ pub struct IngestRequest {
     pub user_id: String,
     pub session_id: String,
     pub dag_id: Option<String>,
-    // step_id is an API alias of arqo task_id.
+    // step_id is an API alias of flory task_id.
     pub step_id: Option<String>,
     pub task_id: Option<String>,
     pub raw_output: Option<String>,

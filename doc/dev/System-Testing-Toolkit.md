@@ -16,24 +16,24 @@
   - we need formal linearizability/consistency claims under partitions and process crashes
 
 ## Tools added
-- `tools/testing/arqo_smoke.rb`
+- `tools/testing/flory_smoke.rb`
   - Creates a session and waits until DAG reaches terminal state.
   - Exits non-zero if DAG becomes `FAILED/REPLANNING` or timeout.
-- `tools/testing/arqo_fault_injector.rb`
+- `tools/testing/flory_fault_injector.rb`
   - Scenario 1: force task failure and verify DAG moves to `REPLANNING`.
   - Scenario 2: simulate owner conflict and verify API returns `409`.
-- `tools/testing/arqo_missing_skill_regression.rb`
+- `tools/testing/flory_missing_skill_regression.rb`
   - Scenario: consecutive `mapping_status=unmapped` expansion should be blocked.
   - Verify API returns `422` with `code=missing_skill`.
   - Verify DAG state transitions to `REPLANNING`.
-- `tools/testing/arqo_regression_suite.rb`
+- `tools/testing/flory_regression_suite.rb`
   - Serial suite entrypoint: `smoke -> fault -> missing_skill`.
   - Auto-starts/stops `worker-ts` only for smoke phase to avoid lease ownership races in fault/missing-skill scenarios.
-- `tools/testing/arqo_self_heal_drill.rb`
+- `tools/testing/flory_self_heal_drill.rb`
   - Scenario: simulate worker crash on leased task, then execute manual sweep and apply replan patch.
   - Verify DAG transitions: `RUNNING -> REPLANNING -> RUNNING -> SUCCESS`.
   - Covers the full self-healing execution path.
-- `tools/testing/arqo_self_heal_persistent_drill.rb`
+- `tools/testing/flory_self_heal_persistent_drill.rb`
   - Scenario: run crash->lease-expiry->replan->resume loop for persistent scheduler backend (`mysql`/`tidb`).
   - Produces stability metrics: `pass_rate`, `replan_total`, `avg_duration_seconds`, `p95_duration_seconds`, `manual_sweep_hit_count`.
   - Fails the run when pass rate is lower than configured threshold.
@@ -42,14 +42,14 @@
 ```bash
 make test-smoke-ruby
 make test-fault-ruby
-ruby tools/testing/arqo_missing_skill_regression.rb
+ruby tools/testing/flory_missing_skill_regression.rb
 make test-self-heal-ruby
 make test-self-heal-persistent-ruby
 make test-regression-ruby
 ```
 
 Optional env:
-- `ARQO_URL` (default `http://127.0.0.1:8080`)
+- `FLORY_URL` (default `http://127.0.0.1:8080`)
 - `SMOKE_TIMEOUT_SECONDS` (default `30`)
 - `SMOKE_POLL_INTERVAL_SECONDS` (default `0.5`)
 - `SELF_HEAL_PERSIST_ITERATIONS` (default `3`)

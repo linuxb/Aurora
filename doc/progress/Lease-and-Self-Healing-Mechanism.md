@@ -1,7 +1,7 @@
 # Lease and Self-Healing Mechanism
 
 ## Scope
-- Component: `arqo` scheduler (`memory` and `mysql/tidb` backends)
+- Component: `flory` scheduler (`memory` and `mysql/tidb` backends)
 - Topic: task lease ownership, expiry handling, and recovery behavior
 
 ## Why Lease Exists
@@ -21,7 +21,7 @@
 
 ## Configurable Expiry Policy
 Environment variable:
-- `ARQO_LEASE_EXPIRE_POLICY`
+- `FLORY_LEASE_EXPIRE_POLICY`
 
 Supported values:
 - `failed_replan` (default)

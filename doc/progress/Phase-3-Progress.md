@@ -16,7 +16,7 @@
   - task status transitions to `FAILED` with replanning signal path
   - endpoint response count is consistent
 - Added configurable lease-expiry policy:
-  - `ARQO_LEASE_EXPIRE_POLICY=failed_replan|retry_ready`
+  - `FLORY_LEASE_EXPIRE_POLICY=failed_replan|retry_ready`
   - `failed_replan` (default): expired task -> `FAILED`, DAG -> `REPLANNING`
   - `retry_ready`: expired task -> `READY`, DAG remains running
 - Added persistent-store parity tests (MySQL/TiDB SQL path via sqlmock):
@@ -35,17 +35,17 @@
   - scheduler injects patch tasks, restores DAG to `RUNNING`, and resumes execution path
   - publishes `DAG_REPLAN_APPLIED` event on success
 - Added crash-sweep-resume fault drill script:
-  - `tools/testing/arqo_self_heal_drill.rb`
+  - `tools/testing/flory_self_heal_drill.rb`
   - flow: worker crash simulation -> manual sweep -> replan patch -> execution resume -> DAG success assertion
   - Makefile target: `make test-self-heal-ruby`
 - Added persistent self-heal loop drill for MySQL/TiDB runtime:
-  - `tools/testing/arqo_self_heal_persistent_drill.rb`
+  - `tools/testing/flory_self_heal_persistent_drill.rb`
   - flow: `RUNNING(crash lease)` -> `REPLANNING(lease expiry)` -> `RUNNING(replan patch)` -> `SUCCESS`
   - loop + metrics: `pass_rate`, `replan_total`, `avg_duration_seconds`, `p95_duration_seconds`, `manual_sweep_hit_count`
   - Makefile target: `make test-self-heal-persistent-ruby`
 
 ## Verification
-- `go test ./...` in `apps/arqo` passes including new sweep endpoint test.
+- `go test ./...` in `apps/flory` passes including new sweep endpoint test.
 
 ## Pending in Phase 3
 - [Deferred / Low Priority TODO] Run the persistent drill against real MySQL/TiDB deployment and archive baseline metric snapshots in progress log.

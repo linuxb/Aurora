@@ -9,22 +9,22 @@
 - Start Intent Router + DAG Validator track with a testable static DAG validator core.
 
 ## Delivered in This Increment
-- Added `arqo` DAG validator module: `apps/arqo/internal/planner/validator.go`.
+- Added `flory` DAG validator module: `apps/flory/internal/planner/validator.go`.
 - Added validation coverage:
   - cycle detection
   - dangling dependency detection
   - isolated node warning
-- Added unit tests: `apps/arqo/internal/planner/validator_test.go`.
-- Added mock intent-router planner: `apps/arqo/internal/planner/router.go`.
+- Added unit tests: `apps/flory/internal/planner/validator_test.go`.
+- Added mock intent-router planner: `apps/flory/internal/planner/router.go`.
 - Wired planner + validator into `POST /v1/sessions`:
   - validate DAG plan before session creation
   - return `422 invalid_dag_plan` when plan is invalid
 - Added API tests for create-session validation path:
   - invalid plan rejected
   - valid plan accepted
-- Added planner backend factory (`ARQO_PLANNER_BACKEND`, default `mock`):
-  - `apps/arqo/internal/planner/factory.go`
-  - wired in `apps/arqo/main.go`
+- Added planner backend factory (`FLORY_PLANNER_BACKEND`, default `mock`):
+  - `apps/flory/internal/planner/factory.go`
+  - wired in `apps/flory/main.go`
   - factory tests added
 - Upgraded planner output to a structured plan contract:
   - `planner.Plan` now includes `plan_id`, `source`, `nodes`, `warnings`
@@ -48,10 +48,10 @@
 - Added planner backend failover contract:
   - `Router.Plan(...)` now returns `(Plan, error)`
   - added `ModelRouter` stub + `FallbackRouter`
-  - `ARQO_PLANNER_BACKEND=model` supports `ARQO_PLANNER_FALLBACK=mock|none`
+  - `FLORY_PLANNER_BACKEND=model` supports `FLORY_PLANNER_FALLBACK=mock|none`
   - API now returns `plan_generation_failed` when router cannot produce a plan
 - Replaced model planner stub with HTTP adapter:
-  - `ModelRouter` now calls configurable endpoint (`ARQO_PLANNER_MODEL_URL`)
+  - `ModelRouter` now calls configurable endpoint (`FLORY_PLANNER_MODEL_URL`)
   - request includes `intent`, `planning_mode`, `model`, `schema`
   - supports both `{ plan: {...} }` and flat plan response forms
   - added tests for unavailable endpoint and successful model plan decode
@@ -61,7 +61,7 @@
   - verifies `planner -> skill` graph creation, intent context injection, and execution ordering
 
 ## Verification
-- `go test ./...` in `apps/arqo` passes with validator tests included.
+- `go test ./...` in `apps/flory` passes with validator tests included.
 
 ## Pending in Phase 2
 - Extend compatibility fixtures to cover backward-tolerant decoding for optional fields.
