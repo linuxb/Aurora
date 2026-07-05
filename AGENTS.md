@@ -1,48 +1,55 @@
 # Aurora Agentic System
 
 ## Project Structure
-- doc/design 设计文档，你可以通过它们了解系统的设计思路，系统架构以及开发Spec。
-  - 文档说明
-    - Flory-JIT.md JIT机制动态扩图方案，对于无法直接映射为已有Skill的Step，需要再次输入LLM进行子图Planning
-    - Intent-Router.md 意图路由模块，描述flory如何从用户的Prompt分析意图，Skill注入拆解为DAG
-    - System-Spec.md 一些协议Spec，模块之间的交互可以参考
-    - Aurora-Architechure.md 系统整体架构描述。进行开发计划规划以及进度回顾需要参考。架构review必须参考
-    - Plato-GraphRAG.md GraphRAG子系统的详细设计，设计GraphRAG部份需参考
-- doc/progress 开发进度记录，研发时可以回顾之前开发内容。每次研发有一定进展需要补充信息到progress对应文档，比如完成了一些待办项要把progress文档对应的记录删除掉，避免后续重复开发
-- doc/review 架构/代码review输出报告的位置
-  - logs 常规的code/architecture review记录
-- doc/dev 开发调试指引，包括一些测试工具的使用
-- doc/spec 开发的具体协议Spec，比如DAG生成约束，Sandbox/Skill交互协议。review阶段或方案制定阶段如果涉及协议，可以输出到该目录
-- doc/plan 架构设计/优化方案的具体研发计划，review或者新方案架构，或者研发优先级调整需要改动对应的plan文档
-  - Phase-Plan.md 项目总体的研发计划，每次计划的调整都要记录在总体研发计划
-- doc/optimization 当需要实现优化时，优化方案以及技术实现细节可以记录在该位置
-- doc/refactor 重构文档记录位置
 
-- 具体工程目录以及功能说明参考 README.md
-- 生成文档时需要按照类别写入特定目录
+- `doc/design`: design documents. Use them to understand system design ideas, architecture, and development specs.
+  - Document guide:
+    - `Flory-JIT.md`: dynamic JIT graph-expansion design. For Steps that cannot map directly to an existing Skill, the LLM is invoked again to plan a child graph.
+    - `Intent-Router.md`: Intent Router design. It describes how Flory analyzes user prompts, injects Skills, and decomposes requests into DAGs.
+    - `System-Spec.md`: protocol specs for module interactions.
+    - `Aurora-Architechure.md`: overall system architecture. Refer to it for development planning, progress review, and architecture review.
+    - `Plato-GraphRAG.md`: detailed design for the GraphRAG subsystem. Refer to it when designing GraphRAG-related features.
+    - `Mem3.md`: detailed design for memory system. Refer to it when designing and developing memory system for agents.
+- `doc/progress`: development progress records. Review these during implementation. Whenever development makes meaningful progress, update the relevant progress document, such as removing completed TODOs to avoid duplicate future work.
+- `doc/review`: output location for architecture and code review reports.
+  - `logs`: regular code and architecture review records.
+- `doc/dev`: development and debugging guides, including usage notes for test tools.
+- `doc/spec`: concrete development protocol specs, such as DAG generation constraints and Sandbox/Skill interaction protocols. If a review or design proposal involves protocols, place the output here.
+- `doc/plan`: concrete R&D plans for architecture design and optimization proposals. Update the relevant plan document when reviewing architecture, drafting a new proposal, or adjusting development priorities.
+  - `Phase-Plan.md`: overall project R&D plan. Every plan adjustment must be recorded in the overall R&D plan.
+- `doc/optimization`: optimization proposals and technical implementation details.
+- `doc/refactor`: refactoring documentation.
+
+Refer to `README.md` for concrete project directories and feature descriptions.
+
+When generating documentation, write it to the category-specific directory.
 
 ## Plan
-- 第一阶段我们只需要实现核心的框架，一些LLM调用接口可以先实现逻辑，数据可以mock。TS Worker可以简单实现几个demo，不需要模拟函数计算的serverless环境。但是核心的dag流转，调度器核心逻辑，记忆管理（GraphRAG，滚动压缩，内部查询Kvrocks输出的Skill）等需要把核心逻辑实现。
-- 该阶段的测试可以对一些未实现的组件进行mock，或者实现最小可测试单元。
 
-- 第二阶段我们需要细化，把一些上一个阶段mock的组件逐个完善。
+- In the first phase, implement only the core framework. Some LLM call interfaces may initially implement the flow with mocked data. The TS Worker can provide a few simple demos and does not need to simulate a serverless function-computing environment. However, core DAG transitions, scheduler logic, and memory management, including GraphRAG, rolling compression, and internal Skills that query KvRocks output, must implement their core logic.
+- Tests in this phase may mock unfinished components or implement the smallest testable units.
+- In the second phase, refine the system and replace mocked components from the previous phase one by one.
+- In the third phase, try local deployment while supporting both local and cloud-native services.
 
-- 第三阶段我们需要尝试本地化部署，同时支持本地和云原生服务。
+## Development Environment
 
-## dev enviroment
-- 初期开发环境搭建尽量保证在macos m2本机环境可以运行demo，对组件的依赖可以先以来docker compose方式搭建最小可用版本。初期先保证我可以在本机环境方便开发调试。
-- 我的本机环境是Goland，VSCode等编辑器，我希望能在这些IDE中进行可视化的断点调试debug，在生成工程的时候希望能生成VSC需要的配置文件。针对Rust/Go/TS等语言环境进行配置。
+- The initial development environment should make it easy to run a demo on a local macOS M2 machine. Component dependencies can initially be provided through Docker Compose as a minimal viable setup. Prioritize convenient local development and debugging.
+- The local development environment includes IDEs such as GoLand and VSCode. The project should support visual breakpoint debugging in these IDEs. When generating project scaffolding, include the VSCode configuration required for Rust, Go, TypeScript, and related language environments.
 
 ## Spec
-- 在项目研发过程中，需要生成必要的编辑器配置，各语言lint，format的配置文件，我们严格遵循Google Style来进行代码风格检查以及代码的格式化。
-- 在Git提交项目时需要遵循Git Commit提交规范（参考大型开源项目的提交规范）。
-- 我们默认采用main分支进行开发，远程仓库提交请参考
+
+- During project development, generate the necessary editor configuration, language-specific lint configuration, and formatting configuration. Follow Google Style strictly for code style checks and formatting.
+- Git commits must follow conventional commit standards, referencing conventions used by large open-source projects.
+- Development uses the `main` branch by default. For remote repository setup, refer to:
+
 ```shell
 git remote add origin git@github.com:linuxb/Aurora.git
 git branch -M main
 git push -u origin main
 ```
-- 在完成一个模块单元（可以生成对应的测试用例）完成单元测试后，即可进行单个小模块的提交。
+
+- After a module unit is complete and has corresponding tests, run the unit tests and then create a small module-level commit.
 
 ## Notice
-- 开发功能时，先检索能否基于主流成熟的库进行实现，比如SQL操作，HTTP等网络基础操作，编码解码等，避免陷入重复造轮子的无效工作。
+
+- When developing features, first check whether they can be implemented with mature mainstream libraries, such as libraries for SQL operations, HTTP/network basics, encoding, and decoding. Avoid spending time reinventing low-value wheels.
